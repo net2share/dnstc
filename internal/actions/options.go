@@ -144,7 +144,7 @@ func RunningTunnelPicker(ctx *Context) (string, error) {
 	}
 
 	if len(options) == 0 {
-		return "", NewActionError("no running tunnels", "Start a tunnel first with 'dnstc tunnel start'")
+		return "", NewActionError("no running tunnels", "Connect first with 'dnstc up' or use the TUI")
 	}
 
 	ctx.Set("_picker_options", options)

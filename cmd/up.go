@@ -46,6 +46,10 @@ var upCmd = &cobra.Command{
 			}
 		}
 
+		if status.DNSProxyAddr != "" {
+			fmt.Printf("  dns proxy listening on %s\n", status.DNSProxyAddr)
+		}
+
 		if status.GatewayAddr != "" {
 			fmt.Printf("  gateway listening on %s → active tunnel: %s\n", status.GatewayAddr, status.Active)
 		}

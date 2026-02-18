@@ -16,7 +16,6 @@ func isInfoViewAction(actionID string) bool {
 	case actions.ActionTunnelStatus:
 		return true
 	case actions.ActionTunnelAdd, actions.ActionTunnelRemove,
-		actions.ActionTunnelStart, actions.ActionTunnelStop, actions.ActionTunnelRestart,
 		actions.ActionUninstall:
 		return true
 	}

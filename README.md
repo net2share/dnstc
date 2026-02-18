@@ -7,7 +7,8 @@ A cross-platform CLI tool for managing DNS tunnel connections. Supports multiple
 - **Transports**: Slipstream and DNSTT
 - **Backends**: SOCKS (standalone) and Shadowsocks (SIP003 plugin)
 - **Gateway proxy**: Single SOCKS port routing to the active tunnel, switchable at runtime
-- **Running modes**: Interactive TUI, headless foreground (`dnstc up`), systemd service (Linux)
+- **DNS proxy**: Local caching DNS proxy with health-aware upstream selection
+- **Running modes**: Interactive TUI, headless foreground (`dnstc up`/`dnstc down`), systemd service (Linux)
 - **Auto-download**: Required binaries (slipstream-client, dnstt-client, sslocal) fetched on first use
 - **Named tunnels**: Auto-generated adjective-noun tags (e.g. `swift-tunnel`)
 - **Per-tunnel ports**: Each tunnel gets its own local port, auto-assigned if not specified
@@ -47,7 +48,7 @@ Run without arguments:
 dnstc
 ```
 
-Full-screen menu for adding, starting, stopping, activating, and removing tunnels. Configuration changes take effect immediately.
+Full-screen menu with Connect/Disconnect, tunnel management, and configuration. Changes take effect immediately.
 
 ### Headless Mode
 
@@ -58,6 +59,12 @@ dnstc up
 ```
 
 Runs until interrupted with Ctrl+C. All child processes stop when dnstc exits.
+
+Stop a running service:
+
+```bash
+dnstc down
+```
 
 ### Systemd Service (Linux only)
 
@@ -85,11 +92,6 @@ dnstc tunnel add --transport slipstream --backend socks -d tunnel.example.com -p
 
 # List tunnels
 dnstc tunnel list
-
-# Start / stop / restart
-dnstc tunnel start -t <tag>
-dnstc tunnel stop -t <tag>
-dnstc tunnel restart -t <tag>
 
 # Show tunnel status
 dnstc tunnel status -t <tag>
@@ -130,12 +132,19 @@ Removes config, state, downloaded binaries, and logs.
 │     Active Tunnel        │  Per-tunnel local port
 │   (e.g. :41023)          │  Running transport binary
 └───────────┬──────────────┘
-            │ DNS-over-HTTPS / DNS queries
+            │ DNS queries
+            ▼
+┌──────────────────────────┐
+│       DNS Proxy          │  Local caching proxy
+│   Health-aware routing   │  Fastest healthy upstream
+└───────────┬──────────────┘
+            │
             ▼
        Remote Server
 ```
 
 - The **gateway** is a TCP relay that listens on a single configurable port and forwards each connection to whichever tunnel is currently active.
+- The **DNS proxy** is a local caching resolver that routes queries to the fastest healthy upstream. It monitors upstream health and latency, automatically avoiding failed resolvers.
 - **Switching** the active tunnel takes effect on the next connection — no restart needed.
 - Each **tunnel** runs as a child process (slipstream-client, dnstt-client, or sslocal) on its own local port.
 
@@ -180,7 +189,7 @@ Stored in `~/.config/dnstc/config.json`:
 ```
 
 - `listen.socks` — Gateway port. Auto-assigned if the default (1080) is unavailable.
-- `resolvers` — DNS resolvers used by transports.
+- `resolvers` — Upstream DNS resolvers for the local DNS proxy.
 - `tunnels[].port` — Per-tunnel local SOCKS port. Auto-assigned when adding a tunnel.
 - `route.active` — Tag of the tunnel the gateway routes to.
 

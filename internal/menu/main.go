@@ -62,7 +62,12 @@ func buildTunnelSummary() string {
 		}
 	}
 
-	summary := fmt.Sprintf("Tunnels: %d | Running: %d", total, running)
+	connState := "Disconnected"
+	if running > 0 {
+		connState = "Connected"
+	}
+
+	summary := fmt.Sprintf("%s | Tunnels: %d | Running: %d", connState, total, running)
 	if status.GatewayAddr != "" {
 		summary += fmt.Sprintf(" | Gateway: %s", status.GatewayAddr)
 	}
@@ -95,6 +100,14 @@ func runMainMenu() error {
 		header := buildTunnelSummary()
 
 		var options []tui.MenuOption
+
+		eng := engine.Get()
+		if eng != nil && eng.IsConnected() {
+			options = append(options, tui.MenuOption{Label: "Disconnect", Value: "disconnect"})
+		} else {
+			options = append(options, tui.MenuOption{Label: "Connect", Value: "connect"})
+		}
+
 		options = append(options, tui.MenuOption{Label: "Tunnels →", Value: actions.ActionTunnel})
 		options = append(options, tui.MenuOption{Label: "Configure →", Value: actions.ActionConfig})
 		if config.IsInstalled() {
@@ -127,6 +140,10 @@ func runMainMenu() error {
 
 func handleMainMenuChoice(choice string) error {
 	switch choice {
+	case "connect":
+		return handleConnect()
+	case "disconnect":
+		return handleDisconnect()
 	case actions.ActionTunnel:
 		return runTunnelMenu()
 	case actions.ActionConfig:
@@ -141,6 +158,54 @@ func handleMainMenuChoice(choice string) error {
 		tui.EndSession()
 		os.Exit(0)
 	}
+	return nil
+}
+
+func handleConnect() error {
+	eng := engine.Get()
+	if eng == nil {
+		return fmt.Errorf("engine not initialized")
+	}
+
+	cfg := eng.GetConfig()
+	if len(cfg.Tunnels) == 0 {
+		_ = tui.ShowMessage(tui.AppMessage{Type: "info", Message: "No tunnels configured. Add one first."})
+		return errCancelled
+	}
+
+	_ = tui.ShowMessage(tui.AppMessage{Type: "info", Message: "Connecting..."})
+	if err := eng.Start(); err != nil {
+		return fmt.Errorf("failed to connect: %w", err)
+	}
+
+	status := eng.Status()
+	running := 0
+	for _, ts := range status.Tunnels {
+		if ts.Running {
+			running++
+		}
+	}
+
+	if running == 0 {
+		eng.Stop()
+		return fmt.Errorf("no tunnels could be started")
+	}
+
+	_ = tui.ShowMessage(tui.AppMessage{Type: "success", Message: fmt.Sprintf("Connected — %d tunnel(s) running", running)})
+	return nil
+}
+
+func handleDisconnect() error {
+	eng := engine.Get()
+	if eng == nil {
+		return fmt.Errorf("engine not initialized")
+	}
+
+	if err := eng.Stop(); err != nil {
+		return fmt.Errorf("failed to disconnect: %w", err)
+	}
+
+	_ = tui.ShowMessage(tui.AppMessage{Type: "success", Message: "Disconnected"})
 	return nil
 }
 
@@ -250,22 +315,12 @@ func runTunnelManageMenu(tag string) error {
 		ts := status.Tunnels[tag]
 
 		statusStr := "Stopped"
-		isRunning := ts != nil && ts.Running
-		if isRunning {
+		if ts != nil && ts.Running {
 			statusStr = "Running"
 		}
 
 		var options []tui.MenuOption
 		options = append(options, tui.MenuOption{Label: "Status", Value: "status"})
-
-		if isRunning {
-			options = append(options,
-				tui.MenuOption{Label: "Restart", Value: "restart"},
-				tui.MenuOption{Label: "Stop", Value: "stop"},
-			)
-		} else {
-			options = append(options, tui.MenuOption{Label: "Start", Value: "start"})
-		}
 
 		if ts == nil || !ts.Active {
 			options = append(options, tui.MenuOption{Label: "Activate", Value: "activate"})
@@ -312,8 +367,7 @@ func runTunnelManageMenu(tag string) error {
 // runTunnelAction runs a tunnel action with the given tag as argument.
 func runTunnelAction(actionID, tunnelTag string) error {
 	switch actionID {
-	case actions.ActionTunnelStatus, actions.ActionTunnelStart,
-		actions.ActionTunnelStop, actions.ActionTunnelRestart,
+	case actions.ActionTunnelStatus,
 		actions.ActionTunnelRemove, actions.ActionTunnelActivate:
 		return runActionWithArgs(actionID, []string{tunnelTag})
 	default:

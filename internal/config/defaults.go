@@ -14,7 +14,7 @@ func (c *Config) ApplyDefaults() {
 
 	// Resolvers default
 	if len(c.Resolvers) == 0 {
-		c.Resolvers = []string{"1.1.1.1:53"}
+		c.Resolvers = []string{DefaultResolver}
 	}
 
 	// Tunnel defaults

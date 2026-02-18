@@ -45,54 +45,6 @@ func init() {
 		},
 	})
 
-	// tunnel start
-	Register(&Action{
-		ID:        ActionTunnelStart,
-		Parent:    ActionTunnel,
-		Use:       "start",
-		Short:     "Start a tunnel",
-		Long:      "Start a DNS tunnel",
-		MenuLabel: "Start",
-		Args: &ArgsSpec{
-			Name:        "tag",
-			Description: "Tunnel tag",
-			Required:    true,
-			PickerFunc:  TunnelPicker,
-		},
-	})
-
-	// tunnel stop
-	Register(&Action{
-		ID:        ActionTunnelStop,
-		Parent:    ActionTunnel,
-		Use:       "stop",
-		Short:     "Stop a tunnel",
-		Long:      "Stop a running DNS tunnel",
-		MenuLabel: "Stop",
-		Args: &ArgsSpec{
-			Name:        "tag",
-			Description: "Tunnel tag",
-			Required:    true,
-			PickerFunc:  TunnelPicker,
-		},
-	})
-
-	// tunnel restart
-	Register(&Action{
-		ID:        ActionTunnelRestart,
-		Parent:    ActionTunnel,
-		Use:       "restart",
-		Short:     "Restart a tunnel",
-		Long:      "Restart a DNS tunnel",
-		MenuLabel: "Restart",
-		Args: &ArgsSpec{
-			Name:        "tag",
-			Description: "Tunnel tag",
-			Required:    true,
-			PickerFunc:  TunnelPicker,
-		},
-	})
-
 	// tunnel remove
 	Register(&Action{
 		ID:        ActionTunnelRemove,

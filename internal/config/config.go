@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 )
 
+// DefaultResolver is the fallback DNS resolver used when none is configured.
+const DefaultResolver = "1.1.1.1:53"
+
 // Config holds the dnstc configuration.
 type Config struct {
 	Log       LogConfig      `json:"log,omitempty"`
@@ -42,7 +45,7 @@ func Default() *Config {
 		Listen: ListenConfig{
 			SOCKS: "127.0.0.1:1080",
 		},
-		Resolvers: []string{"1.1.1.1:53"},
+		Resolvers: []string{DefaultResolver},
 		Tunnels:   []TunnelConfig{},
 		Route:     RouteConfig{},
 	}
@@ -133,7 +136,7 @@ func (c *Config) GetResolver(tc *TunnelConfig) string {
 		return c.Resolvers[0]
 	}
 
-	return "1.1.1.1:53"
+	return DefaultResolver
 }
 
 // GetFormattedConfig returns the configuration as a formatted JSON string.
