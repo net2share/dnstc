@@ -8,7 +8,7 @@ A cross-platform CLI tool for managing DNS tunnel connections. Supports multiple
 - **Backends**: SOCKS (standalone) and Shadowsocks (SIP003 plugin)
 - **Gateway proxy**: Single SOCKS port routing to the active tunnel, switchable at runtime
 - **DNS proxy**: Local caching DNS proxy with health-aware upstream selection
-- **Running modes**: Interactive TUI, headless foreground (`dnstc up`/`dnstc down`), systemd service (Linux)
+- **Running modes**: Interactive TUI, headless foreground (`dnstc up`), systemd service (Linux)
 - **Auto-download**: Required binaries (slipstream-client, dnstt-client, sslocal) fetched on first use
 - **Named tunnels**: Auto-generated adjective-noun tags (e.g. `swift-tunnel`)
 - **Per-tunnel ports**: Each tunnel gets its own local port, auto-assigned if not specified
@@ -59,12 +59,6 @@ dnstc up
 ```
 
 Runs until interrupted with Ctrl+C. All child processes stop when dnstc exits.
-
-Stop a running service:
-
-```bash
-dnstc down
-```
 
 ### Systemd Service (Linux only)
 
