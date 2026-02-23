@@ -173,8 +173,12 @@ func handleConnect() error {
 		return errCancelled
 	}
 
-	_ = tui.ShowMessage(tui.AppMessage{Type: "info", Message: "Connecting..."})
+	pv := tui.NewProgressView("Connecting")
+	pv.AddInfo("Starting tunnels...")
+
 	if err := eng.Start(); err != nil {
+		pv.AddError(fmt.Sprintf("Failed to connect: %v", err))
+		pv.Done()
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 
@@ -188,10 +192,13 @@ func handleConnect() error {
 
 	if running == 0 {
 		eng.Stop()
+		pv.AddError("No tunnels could be started")
+		pv.Done()
 		return fmt.Errorf("no tunnels could be started")
 	}
 
-	_ = tui.ShowMessage(tui.AppMessage{Type: "success", Message: fmt.Sprintf("Connected — %d tunnel(s) running", running)})
+	pv.AddSuccess(fmt.Sprintf("Connected — %d tunnel(s) running", running))
+	pv.Done()
 	return nil
 }
 
@@ -357,7 +364,9 @@ func runTunnelManageMenu(tag string) error {
 				}
 				return errCancelled
 			}
-			if !isInfoViewAction(actionID) {
+			if choice == "activate" {
+				_ = tui.ShowMessage(tui.AppMessage{Type: "success", Message: fmt.Sprintf("Switched active tunnel to '%s'", tag)})
+			} else if !isInfoViewAction(actionID) {
 				tui.WaitForEnter()
 			}
 		}
