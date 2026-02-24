@@ -7,8 +7,10 @@ import (
 	"os"
 
 	"github.com/net2share/dnstc/internal/actions"
+	"github.com/net2share/dnstc/internal/binaries"
 	"github.com/net2share/dnstc/internal/config"
 	"github.com/net2share/dnstc/internal/engine"
+	"github.com/net2share/dnstc/internal/ipc"
 	"github.com/net2share/go-corelib/osdetect"
 	"github.com/net2share/go-corelib/tui"
 )
@@ -21,6 +23,52 @@ var (
 	Version   = "dev"
 	BuildTime = "unknown"
 )
+
+// daemonMode indicates the TUI is connected to an external daemon via IPC.
+var daemonMode bool
+
+// daemonClient holds the IPC client when connected to a daemon.
+// Managed by recheckDaemon — closed when daemon disappears.
+var daemonClient *ipc.Client
+
+// SetDaemonMode sets whether the TUI is connected to a daemon.
+func SetDaemonMode(v bool) { daemonMode = v }
+
+// IsDaemonMode returns true if connected to a daemon.
+func IsDaemonMode() bool { return daemonMode }
+
+// SetDaemonClient stores the IPC client for daemon mode lifecycle management.
+func SetDaemonClient(c *ipc.Client) { daemonClient = c }
+
+// recheckDaemon detects if a daemon appeared or disappeared since last check,
+// and switches the engine accordingly.
+func recheckDaemon() {
+	if daemonMode {
+		// We're in daemon mode — verify daemon is still alive
+		if daemonClient != nil {
+			if _, err := daemonClient.Ping(); err == nil {
+				return // still alive
+			}
+			// Daemon died — switch to nil engine
+			daemonClient.Close()
+			daemonClient = nil
+		}
+		daemonMode = false
+		engine.Set(nil)
+		return
+	}
+
+	// We're in local mode — check if a daemon appeared
+	running, client := ipc.DetectDaemon()
+	if !running {
+		return
+	}
+
+	// Daemon appeared — switch to daemon mode
+	daemonMode = true
+	daemonClient = client
+	engine.Set(client)
+}
 
 const dnstcBanner = `
     ____  _   _______  ______
@@ -42,14 +90,27 @@ func PrintBanner() {
 
 // buildTunnelSummary builds a summary string for the main menu header.
 func buildTunnelSummary() string {
+	if !binaries.AreInstalled() {
+		return "Not installed — run Install Binaries first"
+	}
+
 	eng := engine.Get()
+
 	if eng == nil {
-		return ""
+		// No daemon — load config from disk for tunnel count
+		cfg, err := config.LoadOrDefault()
+		if err != nil || len(cfg.Tunnels) == 0 {
+			return "Disconnected"
+		}
+		return fmt.Sprintf("Disconnected | Tunnels: %d", len(cfg.Tunnels))
 	}
 
 	cfg := eng.GetConfig()
 	total := len(cfg.Tunnels)
 	if total == 0 {
+		if daemonMode {
+			return "[daemon]"
+		}
 		return ""
 	}
 
@@ -74,11 +135,13 @@ func buildTunnelSummary() string {
 	if status.Active != "" {
 		summary += fmt.Sprintf(" | Active: %s", status.Active)
 	}
+	if daemonMode {
+		summary += " | [daemon]"
+	}
 	return summary
 }
 
 // RunInteractive shows the main interactive menu.
-// The engine must be set via engine.Set() before calling this.
 func RunInteractive() error {
 	PrintBanner()
 
@@ -97,19 +160,30 @@ func RunInteractive() error {
 
 func runMainMenu() error {
 	for {
+		// Re-check for daemon each iteration
+		recheckDaemon()
+
 		header := buildTunnelSummary()
 
 		var options []tui.MenuOption
+		installed := binaries.AreInstalled()
 
-		eng := engine.Get()
-		if eng != nil && eng.IsConnected() {
-			options = append(options, tui.MenuOption{Label: "Disconnect", Value: "disconnect"})
+		if installed {
+			// Check live state for Connect/Disconnect
+			eng := engine.Get()
+			if eng != nil && eng.IsConnected() {
+				options = append(options, tui.MenuOption{Label: "Disconnect", Value: "disconnect"})
+			} else {
+				options = append(options, tui.MenuOption{Label: "Connect", Value: "connect"})
+			}
+
+			options = append(options, tui.MenuOption{Label: "Tunnels →", Value: actions.ActionTunnel})
+			options = append(options, tui.MenuOption{Label: "Configure →", Value: actions.ActionConfig})
+			options = append(options, tui.MenuOption{Label: "Check Updates", Value: actions.ActionUpdate})
 		} else {
-			options = append(options, tui.MenuOption{Label: "Connect", Value: "connect"})
+			options = append(options, tui.MenuOption{Label: "Install Binaries", Value: actions.ActionInstall})
 		}
 
-		options = append(options, tui.MenuOption{Label: "Tunnels →", Value: actions.ActionTunnel})
-		options = append(options, tui.MenuOption{Label: "Configure →", Value: actions.ActionConfig})
 		if config.IsInstalled() {
 			options = append(options, tui.MenuOption{Label: "Uninstall", Value: actions.ActionUninstall})
 		}
@@ -148,6 +222,16 @@ func handleMainMenuChoice(choice string) error {
 		return runTunnelMenu()
 	case actions.ActionConfig:
 		return RunSubmenu(actions.ActionConfig)
+	case actions.ActionInstall:
+		if err := RunAction(actions.ActionInstall); err != nil && err != errCancelled {
+			return err
+		}
+		return nil
+	case actions.ActionUpdate:
+		if err := RunAction(actions.ActionUpdate); err != nil && err != errCancelled {
+			return err
+		}
+		return nil
 	case actions.ActionUninstall:
 		if err := RunAction(actions.ActionUninstall); err != nil {
 			if err == errCancelled {
@@ -162,27 +246,40 @@ func handleMainMenuChoice(choice string) error {
 }
 
 func handleConnect() error {
-	eng := engine.Get()
-	if eng == nil {
-		return fmt.Errorf("engine not initialized")
+	// Check if tunnels exist before forking a daemon
+	cfg, err := config.LoadOrDefault()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
 	}
-
-	cfg := eng.GetConfig()
 	if len(cfg.Tunnels) == 0 {
 		_ = tui.ShowMessage(tui.AppMessage{Type: "info", Message: "No tunnels configured. Add one first."})
 		return errCancelled
 	}
 
 	pv := tui.NewProgressView("Connecting")
-	pv.AddInfo("Starting tunnels...")
+	pv.AddInfo("Starting daemon...")
 
-	if err := eng.Start(); err != nil {
+	// Fork daemon if needed, get connected client
+	client, err := ipc.EnsureDaemon()
+	if err != nil {
+		pv.AddError(fmt.Sprintf("Failed to start daemon: %v", err))
+		pv.Done()
+		return fmt.Errorf("failed to start daemon: %w", err)
+	}
+
+	// Set daemon mode
+	daemonMode = true
+	daemonClient = client
+	engine.Set(client)
+
+	// Start tunnels via IPC
+	if err := client.Start(); err != nil {
 		pv.AddError(fmt.Sprintf("Failed to connect: %v", err))
 		pv.Done()
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 
-	status := eng.Status()
+	status := client.Status()
 	running := 0
 	for _, ts := range status.Tunnels {
 		if ts.Running {
@@ -191,7 +288,12 @@ func handleConnect() error {
 	}
 
 	if running == 0 {
-		eng.Stop()
+		client.Stop()
+		client.Shutdown()
+		client.Close()
+		daemonMode = false
+		daemonClient = nil
+		engine.Set(nil)
 		pv.AddError("No tunnels could be started")
 		pv.Done()
 		return fmt.Errorf("no tunnels could be started")
@@ -205,12 +307,21 @@ func handleConnect() error {
 func handleDisconnect() error {
 	eng := engine.Get()
 	if eng == nil {
-		return fmt.Errorf("engine not initialized")
+		return fmt.Errorf("not connected")
 	}
 
-	if err := eng.Stop(); err != nil {
-		return fmt.Errorf("failed to disconnect: %w", err)
+	// Stop tunnels via IPC
+	eng.Stop()
+
+	// Shutdown daemon process
+	if daemonClient != nil {
+		daemonClient.Shutdown()
+		daemonClient.Close()
 	}
+
+	daemonMode = false
+	daemonClient = nil
+	engine.Set(nil)
 
 	_ = tui.ShowMessage(tui.AppMessage{Type: "success", Message: "Disconnected"})
 	return nil
@@ -255,18 +366,38 @@ func runTunnelMenu() error {
 func runTunnelListMenu() error {
 	for {
 		eng := engine.Get()
-		if eng == nil {
-			_ = tui.ShowMessage(tui.AppMessage{Type: "error", Message: "Engine not running"})
-			return errCancelled
+
+		// Load config — from engine if available, otherwise from disk
+		var cfg *config.Config
+		var status *engine.Status
+
+		if eng != nil {
+			cfg = eng.GetConfig()
+			status = eng.Status()
+		} else {
+			var err error
+			cfg, err = config.LoadOrDefault()
+			if err != nil {
+				_ = tui.ShowMessage(tui.AppMessage{Type: "error", Message: "Failed to load config"})
+				return errCancelled
+			}
+			// Build empty status — all tunnels stopped
+			status = &engine.Status{
+				Active:  cfg.Route.Active,
+				Tunnels: make(map[string]*engine.TunnelStatus),
+			}
+			for _, tc := range cfg.Tunnels {
+				status.Tunnels[tc.Tag] = &engine.TunnelStatus{
+					Tag:    tc.Tag,
+					Active: tc.Tag == cfg.Route.Active,
+				}
+			}
 		}
 
-		cfg := eng.GetConfig()
 		if len(cfg.Tunnels) == 0 {
 			_ = tui.ShowMessage(tui.AppMessage{Type: "info", Message: "No tunnels configured. Add one first."})
 			return errCancelled
 		}
-
-		status := eng.Status()
 
 		var options []tui.MenuOption
 		for _, tc := range cfg.Tunnels {
@@ -297,9 +428,7 @@ func runTunnelListMenu() error {
 			return errCancelled
 		}
 
-		if err := runTunnelManageMenu(selected); err != errCancelled {
-			tui.WaitForEnter()
-		}
+		_ = runTunnelManageMenu(selected)
 	}
 }
 
@@ -307,18 +436,38 @@ func runTunnelListMenu() error {
 func runTunnelManageMenu(tag string) error {
 	for {
 		eng := engine.Get()
-		if eng == nil {
-			return errCancelled
+
+		// Load config and status — from engine or disk
+		var cfg *config.Config
+		var status *engine.Status
+
+		if eng != nil {
+			cfg = eng.GetConfig()
+			status = eng.Status()
+		} else {
+			var err error
+			cfg, err = config.LoadOrDefault()
+			if err != nil {
+				return errCancelled
+			}
+			status = &engine.Status{
+				Active:  cfg.Route.Active,
+				Tunnels: make(map[string]*engine.TunnelStatus),
+			}
+			for _, tc := range cfg.Tunnels {
+				status.Tunnels[tc.Tag] = &engine.TunnelStatus{
+					Tag:    tc.Tag,
+					Active: tc.Tag == cfg.Route.Active,
+				}
+			}
 		}
 
-		cfg := eng.GetConfig()
 		tc := cfg.GetTunnelByTag(tag)
 		if tc == nil {
 			_ = tui.ShowMessage(tui.AppMessage{Type: "error", Message: fmt.Sprintf("Tunnel '%s' not found", tag)})
 			return nil
 		}
 
-		status := eng.Status()
 		ts := status.Tunnels[tag]
 
 		statusStr := "Stopped"
@@ -356,19 +505,12 @@ func runTunnelManageMenu(tag string) error {
 				continue
 			}
 			_ = tui.ShowMessage(tui.AppMessage{Type: "error", Message: err.Error()})
-		} else {
-			if choice == "remove" {
-				// Reload engine config after removing a tunnel
-				if eng := engine.Get(); eng != nil {
-					eng.ReloadConfig()
-				}
-				return errCancelled
+		} else if choice == "remove" {
+			// Reload engine config after removing a tunnel
+			if eng := engine.Get(); eng != nil {
+				eng.ReloadConfig()
 			}
-			if choice == "activate" {
-				_ = tui.ShowMessage(tui.AppMessage{Type: "success", Message: fmt.Sprintf("Switched active tunnel to '%s'", tag)})
-			} else if !isInfoViewAction(actionID) {
-				tui.WaitForEnter()
-			}
+			return errCancelled
 		}
 	}
 }

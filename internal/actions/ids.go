@@ -17,5 +17,7 @@ const (
 	ActionConfigGatewayPort = "config.gateway-port"
 
 	// System actions
+	ActionInstall   = "install"
+	ActionUpdate    = "update"
 	ActionUninstall = "uninstall"
 )

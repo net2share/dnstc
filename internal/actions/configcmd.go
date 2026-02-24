@@ -10,12 +10,13 @@ import (
 func init() {
 	// Config parent action (submenu)
 	Register(&Action{
-		ID:        ActionConfig,
-		Use:       "config",
-		Short:     "Manage configuration",
-		Long:      "Show or edit configuration",
-		MenuLabel: "Configure",
-		IsSubmenu: true,
+		ID:              ActionConfig,
+		Use:             "config",
+		Short:           "Manage configuration",
+		Long:            "Show or edit configuration",
+		MenuLabel:       "Configure",
+		IsSubmenu:       true,
+		RequiresInstall: true,
 	})
 
 	// config show
@@ -48,11 +49,11 @@ func init() {
 		MenuLabel: "Gateway Port",
 		Inputs: []InputField{
 			{
-				Name:      "port",
-				Label:     "Gateway Port",
-				ShortFlag: 'p',
-				Type:      InputTypeNumber,
-				Required:  true,
+				Name:        "port",
+				Label:       "Gateway Port",
+				ShortFlag:   'p',
+				Type:        InputTypeNumber,
+				Required:    true,
 				Description: "Local SOCKS port for the gateway proxy",
 				DefaultFunc: func(ctx *Context) string {
 					if ctx.Config != nil && ctx.Config.Listen.SOCKS != "" {
@@ -63,10 +64,18 @@ func init() {
 					}
 					return "1080"
 				},
-				Validate: func(value string) error {
+				ValidateWithContext: func(ctx *Context, value string) error {
 					p, err := strconv.Atoi(value)
 					if err != nil || p <= 0 || p > 65535 {
 						return fmt.Errorf("invalid port number")
+					}
+					// Skip port-in-use check if it matches current config
+					// (the gateway itself may be listening on it).
+					if ctx.Config != nil && ctx.Config.Listen.SOCKS != "" {
+						_, currentPort, err := parseHostPort(ctx.Config.Listen.SOCKS)
+						if err == nil && currentPort == value {
+							return nil
+						}
 					}
 					if !port.IsAvailable(p) {
 						return fmt.Errorf("port %d is already in use", p)

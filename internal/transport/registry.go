@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/net2share/dnstc/internal/binaries"
 	"github.com/net2share/dnstc/internal/config"
 )
 
@@ -44,4 +45,15 @@ func GetAll() []Transport {
 // Types returns all available transport types.
 func Types() []config.TransportType {
 	return config.GetTransportTypes()
+}
+
+// resolveBinary resolves a binary path via the binaries manager.
+func resolveBinary(name string) (string, error) {
+	mgr := binaries.NewManager()
+	defs := binaries.Defs()
+	def, ok := defs[name]
+	if !ok {
+		return "", fmt.Errorf("unknown binary: %s", name)
+	}
+	return mgr.ResolvePath(def)
 }

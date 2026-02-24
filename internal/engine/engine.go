@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/net2share/dnstc/internal/binaries"
 	"github.com/net2share/dnstc/internal/config"
 	"github.com/net2share/dnstc/internal/dnsproxy"
-	"github.com/net2share/dnstc/internal/download"
 	"github.com/net2share/dnstc/internal/gateway"
 	"github.com/net2share/dnstc/internal/port"
 	"github.com/net2share/dnstc/internal/process"
@@ -20,19 +20,19 @@ import (
 
 // singleton engine instance
 var (
-	instance *Engine
+	instance EngineController
 	mu       sync.RWMutex
 )
 
 // Set sets the global engine instance.
-func Set(e *Engine) {
+func Set(e EngineController) {
 	mu.Lock()
 	defer mu.Unlock()
 	instance = e
 }
 
 // Get returns the global engine instance, or nil if not running.
-func Get() *Engine {
+func Get() EngineController {
 	mu.RLock()
 	defer mu.RUnlock()
 	return instance
@@ -40,21 +40,21 @@ func Get() *Engine {
 
 // Status represents the current state of all tunnels and the gateway.
 type Status struct {
-	Active       string
-	GatewayAddr  string
-	DNSProxyAddr string
-	Tunnels      map[string]*TunnelStatus
+	Active       string                   `json:"active"`
+	GatewayAddr  string                   `json:"gateway_addr"`
+	DNSProxyAddr string                   `json:"dns_proxy_addr"`
+	Tunnels      map[string]*TunnelStatus `json:"tunnels"`
 }
 
 // TunnelStatus represents the status of a single tunnel.
 type TunnelStatus struct {
-	Tag       string
-	Transport config.TransportType
-	Backend   config.BackendType
-	Domain    string
-	Running   bool
-	Active    bool
-	Port      int
+	Tag       string               `json:"tag"`
+	Transport config.TransportType `json:"transport"`
+	Backend   config.BackendType   `json:"backend"`
+	Domain    string               `json:"domain"`
+	Running   bool                 `json:"running"`
+	Active    bool                 `json:"active"`
+	Port      int                  `json:"port"`
 }
 
 // Engine manages the full dnstc runtime: tunnel processes and gateway.
@@ -271,12 +271,13 @@ func (e *Engine) startTunnelLocked(tag string) error {
 		return fmt.Errorf("failed to get transport provider: %w", err)
 	}
 
-	// Ensure required binaries
-	for _, binary := range t.RequiredBinaries(tc.Backend) {
-		if !download.IsBinaryInstalled(binary) {
-			if err := download.EnsureBinary(binary, nil); err != nil {
-				return fmt.Errorf("failed to download %s: %w", binary, err)
-			}
+	// Check required binaries are installed
+	mgr := binaries.NewManager()
+	defs := binaries.Defs()
+	for _, name := range t.RequiredBinaries(tc.Backend) {
+		def := defs[name]
+		if !mgr.IsInstalled(def) {
+			return fmt.Errorf("binary %s not installed — run 'dnstc install' first", name)
 		}
 	}
 

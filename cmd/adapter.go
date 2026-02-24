@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/net2share/dnstc/internal/actions"
+	"github.com/net2share/dnstc/internal/binaries"
 	"github.com/net2share/dnstc/internal/config"
 	"github.com/net2share/dnstc/internal/handlers"
 	"github.com/spf13/cobra"
@@ -74,13 +75,24 @@ func BuildCobraCommand(action *actions.Action) *cobra.Command {
 		cmd.Flags().BoolP(action.Confirm.ForceFlag, "f", false, "Skip confirmation")
 	}
 
-	// Submenus have no RunE
+	// Submenus have no RunE but propagate install check to children
 	if action.IsSubmenu {
+		if action.RequiresInstall {
+			cmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+				return requireInstall()
+			}
+		}
 		return cmd
 	}
 
 	// Set up the run function
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if action.RequiresInstall {
+			if err := requireInstall(); err != nil {
+				return err
+			}
+		}
+
 		ctx := &actions.Context{
 			Ctx:           context.Background(),
 			Args:          args,
@@ -147,6 +159,14 @@ func BuildCobraCommand(action *actions.Action) *cobra.Command {
 	}
 
 	return cmd
+}
+
+// requireInstall checks that binaries are installed, returning a user-friendly error if not.
+func requireInstall() error {
+	if !binaries.AreInstalled() {
+		return fmt.Errorf("binaries not installed — run 'dnstc install' first")
+	}
+	return nil
 }
 
 // RegisterActionsWithRoot adds all action-based commands to a root command.

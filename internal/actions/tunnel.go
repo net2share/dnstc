@@ -11,12 +11,13 @@ import (
 func init() {
 	// Tunnel parent action (submenu)
 	Register(&Action{
-		ID:        ActionTunnel,
-		Use:       "tunnel",
-		Short:     "Manage tunnels",
-		Long:      "Manage DNS tunnel configurations",
-		MenuLabel: "Tunnels",
-		IsSubmenu: true,
+		ID:              ActionTunnel,
+		Use:             "tunnel",
+		Short:           "Manage tunnels",
+		Long:            "Manage DNS tunnel configurations",
+		MenuLabel:       "Tunnels",
+		IsSubmenu:       true,
+		RequiresInstall: true,
 	})
 
 	// tunnel list

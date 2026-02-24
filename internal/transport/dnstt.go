@@ -3,8 +3,8 @@ package transport
 import (
 	"fmt"
 
+	"github.com/net2share/dnstc/internal/binaries"
 	"github.com/net2share/dnstc/internal/config"
-	"github.com/net2share/dnstc/internal/download"
 )
 
 func init() {
@@ -31,7 +31,7 @@ func (p *DNSTTProvider) SupportedBackends() []config.BackendType {
 
 // RequiredBinaries returns the binaries required for this transport.
 func (p *DNSTTProvider) RequiredBinaries(_ config.BackendType) []string {
-	return []string{download.BinaryDNSTT}
+	return []string{binaries.NameDNSTT}
 }
 
 // ValidateConfig validates the tunnel configuration.
@@ -61,6 +61,9 @@ func (p *DNSTTProvider) BuildArgs(tc *config.TunnelConfig, listenPort int, resol
 		fmt.Sprintf("127.0.0.1:%d", listenPort),
 	}
 
-	binary := download.GetBinaryPath(download.BinaryDNSTT)
+	binary, err := resolveBinary(binaries.NameDNSTT)
+	if err != nil {
+		return "", nil, err
+	}
 	return binary, args, nil
 }

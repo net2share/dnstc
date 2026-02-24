@@ -2,6 +2,40 @@ package actions
 
 func init() {
 	Register(&Action{
+		ID:        ActionInstall,
+		Use:       "install",
+		Short:     "Install required binaries",
+		Long:      "Download and install all required transport binaries",
+		MenuLabel: "Install Binaries",
+	})
+
+	Register(&Action{
+		ID:              ActionUpdate,
+		Use:             "update",
+		Short:           "Check for and apply updates",
+		Long:            "Check for updates to dnstc and transport binaries",
+		MenuLabel:       "Check Updates",
+		RequiresInstall: true,
+		Inputs: []InputField{
+			{
+				Name:  "check",
+				Label: "Check only (don't apply)",
+				Type:  InputTypeBool,
+			},
+			{
+				Name:  "self",
+				Label: "Update dnstc only",
+				Type:  InputTypeBool,
+			},
+			{
+				Name:  "binaries",
+				Label: "Update binaries only",
+				Type:  InputTypeBool,
+			},
+		},
+	})
+
+	Register(&Action{
 		ID:    ActionUninstall,
 		Use:   "uninstall",
 		Short: "Completely uninstall dnstc",

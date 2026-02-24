@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/net2share/dnstc/internal/binaries"
 	"github.com/net2share/dnstc/internal/config"
-	"github.com/net2share/dnstc/internal/download"
 )
 
 func init() {
@@ -34,9 +34,9 @@ func (p *SlipstreamProvider) SupportedBackends() []config.BackendType {
 func (p *SlipstreamProvider) RequiredBinaries(backend config.BackendType) []string {
 	switch backend {
 	case config.BackendShadowsocks:
-		return []string{download.BinaryShadowsocks, download.BinarySlipstream}
+		return []string{binaries.NameShadowsocks, binaries.NameSlipstream}
 	default:
-		return []string{download.BinarySlipstream}
+		return []string{binaries.NameSlipstream}
 	}
 }
 
@@ -90,7 +90,10 @@ func (p *SlipstreamProvider) buildSOCKSArgs(tc *config.TunnelConfig, listenPort 
 		args = append(args, "--cert", tc.Slipstream.Cert)
 	}
 
-	binary := download.GetBinaryPath(download.BinarySlipstream)
+	binary, err := resolveBinary(binaries.NameSlipstream)
+	if err != nil {
+		return "", nil, err
+	}
 	return binary, args, nil
 }
 
@@ -101,8 +104,12 @@ func (p *SlipstreamProvider) buildSIP003Args(tc *config.TunnelConfig, listenPort
 		method = "aes-256-gcm"
 	}
 
+	pluginPath, err := resolveBinary(binaries.NameSlipstream)
+	if err != nil {
+		return "", nil, err
+	}
+
 	listenAddr := fmt.Sprintf("127.0.0.1:%d", listenPort)
-	pluginPath := download.GetBinaryPath(download.BinarySlipstream)
 	pluginOpts := fmt.Sprintf("domain=%s;resolver=%s;", tc.Domain, resolver)
 
 	args := []string{
@@ -114,6 +121,9 @@ func (p *SlipstreamProvider) buildSIP003Args(tc *config.TunnelConfig, listenPort
 		"--plugin-opts", pluginOpts,
 	}
 
-	binary := download.GetBinaryPath(download.BinaryShadowsocks)
+	binary, err := resolveBinary(binaries.NameShadowsocks)
+	if err != nil {
+		return "", nil, err
+	}
 	return binary, args, nil
 }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/net2share/dnstc/internal/actions"
 	"github.com/net2share/dnstc/internal/config"
+	"github.com/net2share/dnstc/internal/engine"
 )
 
 func init() {
@@ -27,16 +28,31 @@ func HandleConfigGatewayPort(ctx *actions.Context) error {
 	newAddr := fmt.Sprintf("127.0.0.1:%d", portVal)
 	oldAddr := cfg.Listen.SOCKS
 
+	if oldAddr == newAddr {
+		ctx.Output.Info(fmt.Sprintf("Gateway port unchanged (%d)", portVal))
+		return nil
+	}
+
 	cfg.Listen.SOCKS = newAddr
 	if err := cfg.Save(); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	if oldAddr != "" && oldAddr != newAddr {
+	if oldAddr != "" {
 		ctx.Output.Success(fmt.Sprintf("Gateway port changed: %s → %s", oldAddr, newAddr))
-		ctx.Output.Info("Restart dnstc for the change to take effect.")
 	} else {
 		ctx.Output.Success(fmt.Sprintf("Gateway port set to %d", portVal))
+	}
+
+	// If engine is running, restart to apply the new port.
+	if eng := engine.Get(); eng != nil && eng.IsConnected() {
+		ctx.Output.Info("Restarting gateway...")
+		eng.Stop()
+		eng.ReloadConfig()
+		if err := eng.Start(); err != nil {
+			return fmt.Errorf("failed to restart: %w", err)
+		}
+		ctx.Output.Success("Gateway restarted on new port")
 	}
 
 	return nil

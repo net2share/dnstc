@@ -44,7 +44,8 @@ type InputField struct {
 	OptionsFunc     func(ctx *Context) []SelectOption
 	ShortFlag       rune
 	ShowIf          func(ctx *Context) bool
-	Validate        func(value string) error
+	Validate            func(value string) error
+	ValidateWithContext func(ctx *Context, value string) error
 	DefaultFunc     func(ctx *Context) string
 	InteractiveOnly bool
 	DescriptionFunc func(ctx *Context) string
@@ -71,19 +72,20 @@ type Handler func(ctx *Context) error
 
 // Action defines a command/menu action.
 type Action struct {
-	ID        string
-	Parent    string
-	Use       string
-	Short     string
-	Long      string
-	MenuLabel string
-	Args      *ArgsSpec
-	Inputs    []InputField
-	Confirm   *ConfirmConfig
-	Handler   Handler
-	Hidden    bool
-	ShowInMenu func(ctx *Context) bool
-	IsSubmenu  bool
+	ID              string
+	Parent          string
+	Use             string
+	Short           string
+	Long            string
+	MenuLabel       string
+	Args            *ArgsSpec
+	Inputs          []InputField
+	Confirm         *ConfirmConfig
+	Handler         Handler
+	Hidden          bool
+	ShowInMenu      func(ctx *Context) bool
+	IsSubmenu       bool
+	RequiresInstall bool // requires binaries to be installed
 }
 
 // Context provides the execution context for action handlers.

@@ -65,12 +65,12 @@ func RequireTunnels(ctx *actions.Context) error {
 }
 
 // RequireEngine returns the running engine or an error if not running.
-func RequireEngine() (*engine.Engine, error) {
+func RequireEngine() (engine.EngineController, error) {
 	eng := engine.Get()
 	if eng == nil {
 		return nil, actions.NewActionError(
 			"no engine running",
-			"Start with: dnstc (interactive) or dnstc up (headless)",
+			"Start with: dnstc (interactive) or dnstc daemon start",
 		)
 	}
 	return eng, nil

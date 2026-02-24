@@ -8,8 +8,8 @@ A cross-platform CLI tool for managing DNS tunnel connections. Supports multiple
 - **Backends**: SOCKS (standalone) and Shadowsocks (SIP003 plugin)
 - **Gateway proxy**: Single SOCKS port routing to the active tunnel, switchable at runtime
 - **DNS proxy**: Local caching DNS proxy with health-aware upstream selection
-- **Running modes**: Interactive TUI, headless foreground (`dnstc up`), systemd service (Linux)
-- **Auto-download**: Required binaries (slipstream-client, dnstt-client, sslocal) fetched on first use
+- **Running modes**: Interactive TUI, background daemon (`dnstc daemon start`), systemd service (Linux)
+- **Binary management**: Install, update, and self-update via `dnstc install` and `dnstc update`
 - **Named tunnels**: Auto-generated adjective-noun tags (e.g. `swift-tunnel`)
 - **Per-tunnel ports**: Each tunnel gets its own local port, auto-assigned if not specified
 - **Process management**: Child processes cleaned up automatically when dnstc exits
@@ -50,27 +50,36 @@ dnstc
 
 Full-screen menu with Connect/Disconnect, tunnel management, and configuration. Changes take effect immediately.
 
-### Headless Mode
+### Daemon Mode
 
-Start all enabled tunnels and the gateway in the foreground:
+Manage the background daemon:
 
 ```bash
-dnstc up
+dnstc daemon start    # Start daemon and tunnels in the background
+dnstc daemon stop     # Stop daemon and all tunnels
+dnstc daemon status   # Show daemon and tunnel status
 ```
-
-Runs until interrupted with Ctrl+C. All child processes stop when dnstc exits.
 
 ### Systemd Service (Linux only)
 
 ```bash
-sudo dnstc service install    # Install and start systemd service
-sudo dnstc service status     # Show service status
-sudo dnstc service uninstall  # Stop and remove service
+sudo dnstc daemon enable    # Install and enable systemd service
+sudo dnstc daemon disable   # Stop and remove systemd service
 ```
 
-The service runs `dnstc up` under systemd with auto-restart on failure.
+The service runs `dnstc daemon run` under systemd with auto-restart on failure.
 
 ### CLI Commands
+
+#### Install & Update
+
+```bash
+dnstc install             # Download and install required binaries
+dnstc update              # Check and apply updates (binaries + self)
+dnstc update --check      # Check only, don't apply
+dnstc update --self       # Update dnstc only
+dnstc update --binaries   # Update binaries only
+```
 
 #### Tunnel Management
 
@@ -189,12 +198,14 @@ Stored in `~/.config/dnstc/config.json`:
 
 ## File Locations
 
-| Purpose       | Path                          |
-|---------------|-------------------------------|
-| Configuration | `~/.config/dnstc/config.json` |
-| State/PIDs    | `~/.config/dnstc/state.json`  |
-| Binaries      | `~/.local/share/dnstc/bin/`   |
-| Logs          | `~/.local/share/dnstc/logs/`  |
+| Purpose       | Path                             |
+|---------------|----------------------------------|
+| Configuration | `~/.config/dnstc/config.json`    |
+| Versions      | `~/.config/dnstc/versions.json`  |
+| State/PIDs    | `~/.config/dnstc/state.json`     |
+| IPC Socket    | `~/.config/dnstc/engine.sock`    |
+| Binaries      | `~/.local/share/dnstc/bin/`      |
+| Logs          | `~/.local/share/dnstc/logs/`     |
 
 Automatic migration from YAML config (`config.yaml`) to JSON is performed on first run.
 

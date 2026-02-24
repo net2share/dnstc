@@ -59,6 +59,21 @@ func StatePath() string {
 	return filepath.Join(ConfigDir(), "state.json")
 }
 
+// SocketPath returns the path to the daemon IPC socket.
+func SocketPath() string {
+	return filepath.Join(ConfigDir(), "engine.sock")
+}
+
+// DaemonLogPath returns the path to the daemon log file.
+func DaemonLogPath() string {
+	return filepath.Join(ConfigDir(), "daemon.log")
+}
+
+// VersionsPath returns the path to the binary version manifest.
+func VersionsPath() string {
+	return filepath.Join(ConfigDir(), "versions.json")
+}
+
 // EnsureDirs creates the config and bin directories if they don't exist.
 func EnsureDirs() error {
 	if err := os.MkdirAll(ConfigDir(), 0750); err != nil {

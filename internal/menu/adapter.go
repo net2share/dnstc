@@ -10,13 +10,16 @@ import (
 	"github.com/net2share/go-corelib/tui"
 )
 
-// isInfoViewAction checks if an action uses TUI info/progress view.
+// isInfoViewAction returns true for actions that manage their own TUI display
+// (dialogs, editors, etc.) and should NOT be wrapped in a progress view.
 func isInfoViewAction(actionID string) bool {
 	switch actionID {
 	case actions.ActionTunnelStatus:
 		return true
 	case actions.ActionTunnelAdd, actions.ActionTunnelRemove,
-		actions.ActionUninstall:
+		actions.ActionUninstall, actions.ActionInstall, actions.ActionUpdate:
+		return true
+	case actions.ActionConfigEdit:
 		return true
 	}
 	return false
@@ -174,8 +177,13 @@ func RunAction(actionID string) error {
 					validationErr = fmt.Errorf("%s is required", input.Label)
 					continue
 				}
-				if input.Validate != nil && val != "" {
-					if validationErr = input.Validate(val); validationErr != nil {
+				if val != "" {
+					if input.ValidateWithContext != nil {
+						validationErr = input.ValidateWithContext(ctx, val)
+					} else if input.Validate != nil {
+						validationErr = input.Validate(val)
+					}
+					if validationErr != nil {
 						continue
 					}
 				}
@@ -210,8 +218,13 @@ func RunAction(actionID string) error {
 				if val == "" && defaultVal != "" {
 					val = defaultVal
 				}
-				if input.Validate != nil && val != "" {
-					if validationErr = input.Validate(val); validationErr != nil {
+				if val != "" {
+					if input.ValidateWithContext != nil {
+						validationErr = input.ValidateWithContext(ctx, val)
+					} else if input.Validate != nil {
+						validationErr = input.Validate(val)
+					}
+					if validationErr != nil {
 						defaultVal = val
 						continue
 					}
@@ -289,6 +302,12 @@ func RunAction(actionID string) error {
 		return fmt.Errorf("no handler for action %s", action.ID)
 	}
 
+	tuiOut := ctx.Output.(*handlers.TUIOutput)
+	if !isInfoViewAction(actionID) {
+		tuiOut.BeginProgress(action.Short)
+		defer tuiOut.EndProgress()
+	}
+
 	return action.Handler(ctx)
 }
 
@@ -356,6 +375,12 @@ func runActionWithArgs(actionID string, args []string) error {
 		return fmt.Errorf("no handler for action %s", actionID)
 	}
 
+	tuiOut := ctx.Output.(*handlers.TUIOutput)
+	if !isInfoViewAction(actionID) {
+		tuiOut.BeginProgress(action.Short)
+		defer tuiOut.EndProgress()
+	}
+
 	return action.Handler(ctx)
 }
 
@@ -385,21 +410,12 @@ func RunSubmenu(parentID string) error {
 
 		childAction := actions.Get(choice)
 		if childAction != nil && childAction.IsSubmenu {
-			if err := RunSubmenu(choice); err != errCancelled {
-				tui.WaitForEnter()
-			}
+			_ = RunSubmenu(choice)
 			continue
 		}
 
-		if err := RunAction(choice); err != nil {
-			if err == errCancelled {
-				continue
-			}
+		if err := RunAction(choice); err != nil && err != errCancelled {
 			_ = tui.ShowMessage(tui.AppMessage{Type: "error", Message: err.Error()})
-		} else {
-			if !isInfoViewAction(choice) {
-				tui.WaitForEnter()
-			}
 		}
 	}
 }

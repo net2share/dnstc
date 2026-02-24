@@ -5,9 +5,8 @@ go 1.25.5
 require (
 	github.com/AdguardTeam/dnsproxy v0.78.2
 	github.com/miekg/dns v1.1.68
-	github.com/net2share/go-corelib v0.1.9
+	github.com/net2share/go-corelib v0.1.11
 	github.com/spf13/cobra v1.10.2
-	github.com/ulikunitz/xz v0.5.15
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -42,6 +41,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
+	github.com/ulikunitz/xz v0.5.15 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/exp v0.0.0-20251113190631-e25ba8c21ef6 // indirect

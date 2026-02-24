@@ -2,14 +2,12 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
-
-	// Import handlers to register them with actions
-	_ "github.com/net2share/dnstc/internal/handlers"
 
 	"github.com/net2share/dnstc/internal/config"
 	"github.com/net2share/dnstc/internal/engine"
+	"github.com/net2share/dnstc/internal/handlers"
+	"github.com/net2share/dnstc/internal/ipc"
 	"github.com/net2share/dnstc/internal/menu"
 	"github.com/net2share/go-corelib/tui"
 	"github.com/spf13/cobra"
@@ -32,19 +30,19 @@ var rootCmd = &cobra.Command{
 		tui.BeginSession()
 		defer tui.EndSession()
 
-		// Load config and start engine
 		config.MigrateConfigIfNeeded()
-		cfg, err := config.LoadOrDefault()
-		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
 
-		eng := engine.New(cfg)
-		engine.Set(eng)
-		defer func() {
-			eng.Stop()
-			engine.Set(nil)
-		}()
+		// Try to connect to existing daemon
+		if running, client := ipc.DetectDaemon(); running {
+			engine.Set(client)
+			menu.SetDaemonMode(true)
+			menu.SetDaemonClient(client)
+			defer func() {
+				client.Close()
+				engine.Set(nil)
+			}()
+		}
+		// No daemon: engine.Get() == nil, TUI works in config-only mode
 
 		return menu.RunInteractive()
 	},
@@ -68,5 +66,6 @@ func Execute() {
 func SetVersionInfo(version, buildTime string) {
 	Version = version
 	BuildTime = buildTime
+	handlers.AppVersion = version
 	rootCmd.Version = version + " (built " + buildTime + ")"
 }
