@@ -8,6 +8,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/net2share/dnstc/internal/binaries"
 	"github.com/net2share/dnstc/internal/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/net2share/dnstc/internal/gateway"
 	"github.com/net2share/dnstc/internal/port"
 	"github.com/net2share/dnstc/internal/process"
+	"github.com/net2share/dnstc/internal/sshtunnel"
 	"github.com/net2share/dnstc/internal/transport"
 )
 
@@ -59,18 +61,20 @@ type TunnelStatus struct {
 
 // Engine manages the full dnstc runtime: tunnel processes and gateway.
 type Engine struct {
-	cfg      *config.Config
-	procMgr  *process.Manager
-	gw       *gateway.Gateway
-	dnsProxy *dnsproxy.Proxy
-	mu       sync.RWMutex
+	cfg        *config.Config
+	procMgr    *process.Manager
+	gw         *gateway.Gateway
+	dnsProxy   *dnsproxy.Proxy
+	sshTunnels map[string]*sshtunnel.Tunnel
+	mu         sync.RWMutex
 }
 
 // New creates a new engine with the given configuration.
 func New(cfg *config.Config) *Engine {
 	return &Engine{
-		cfg:     cfg,
-		procMgr: process.NewManager(config.StatePath()),
+		cfg:        cfg,
+		procMgr:    process.NewManager(config.StatePath()),
+		sshTunnels: make(map[string]*sshtunnel.Tunnel),
 	}
 }
 
@@ -108,6 +112,12 @@ func (e *Engine) Start() error {
 func (e *Engine) Stop() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	// Stop SSH tunnels first (they depend on transport processes)
+	for tag, st := range e.sshTunnels {
+		st.Stop()
+		delete(e.sshTunnels, tag)
+	}
 
 	// Stop all tunnel processes
 	e.procMgr.StopAll()
@@ -158,6 +168,12 @@ func (e *Engine) StopTunnel(tag string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	// Stop SSH tunnel first (depends on transport process)
+	if st, ok := e.sshTunnels[tag]; ok {
+		st.Stop()
+		delete(e.sshTunnels, tag)
+	}
+
 	processName := "tunnel-" + tag
 	if err := e.procMgr.Stop(processName); err != nil {
 		return err
@@ -176,6 +192,12 @@ func (e *Engine) StopTunnel(tag string) error {
 func (e *Engine) RestartTunnel(tag string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	// Stop SSH tunnel if running
+	if st, ok := e.sshTunnels[tag]; ok {
+		st.Stop()
+		delete(e.sshTunnels, tag)
+	}
 
 	processName := "tunnel-" + tag
 	e.procMgr.Stop(processName)
@@ -227,6 +249,15 @@ func (e *Engine) Status() *Status {
 
 		processName := "tunnel-" + tc.Tag
 		ts.Running = e.procMgr.IsRunning(processName)
+
+		// For SSH tunnels, also check the SSH tunnel itself
+		if tc.Backend == config.BackendSSH {
+			if st, ok := e.sshTunnels[tc.Tag]; ok {
+				ts.Running = ts.Running && st.IsAlive()
+			} else {
+				ts.Running = false
+			}
+		}
 
 		s.Tunnels[tc.Tag] = ts
 	}
@@ -281,17 +312,32 @@ func (e *Engine) startTunnelLocked(tag string) error {
 		}
 	}
 
-	// Determine listen port
-	listenPort := tc.Port
-	if listenPort == 0 {
-		listenPort = extractPort(e.cfg.Listen.SOCKS)
-		if listenPort == 0 {
-			listenPort = 1080
+	// For SSH backend, we need two ports:
+	//   internalPort: DNS transport process listens here (raw TCP → SSH)
+	//   exposedPort:  SSH SOCKS5 proxy listens here (what gateway routes to)
+	// For other backends, transport process listens on the exposed port directly.
+	isSSH := tc.Backend == config.BackendSSH
+
+	exposedPort := tc.Port
+	if exposedPort == 0 {
+		exposedPort = extractPort(e.cfg.Listen.SOCKS)
+		if exposedPort == 0 {
+			exposedPort = 1080
 		}
 	}
 
-	if !port.IsAvailable(listenPort) {
-		return fmt.Errorf("port %d is already in use", listenPort)
+	transportPort := exposedPort
+	if isSSH {
+		// Auto-assign an internal port for the transport process
+		internalPort, err := port.GetAvailable()
+		if err != nil {
+			return fmt.Errorf("failed to find internal port for SSH tunnel: %w", err)
+		}
+		transportPort = internalPort
+	} else {
+		if !port.IsAvailable(transportPort) {
+			return fmt.Errorf("port %d is already in use", transportPort)
+		}
 	}
 
 	// Determine resolver: per-tunnel override > DNS proxy > global fallback
@@ -304,15 +350,49 @@ func (e *Engine) startTunnelLocked(tag string) error {
 		resolver = e.cfg.GetResolver(tc)
 	}
 
-	// Build args
-	binary, args, err := t.BuildArgs(tc, listenPort, resolver)
+	// Build args — transport process always listens on transportPort
+	binary, args, err := t.BuildArgs(tc, transportPort, resolver)
 	if err != nil {
 		return fmt.Errorf("failed to build args: %w", err)
 	}
 
-	// Start process
+	// Start transport process
 	if err := e.procMgr.Start(processName, binary, args); err != nil {
 		return fmt.Errorf("failed to start tunnel: %w", err)
+	}
+
+	// For SSH backend, start SSH tunnel asynchronously.
+	// The transport needs time to establish the DNS session before SSH can connect.
+	if isSSH {
+		transportAddr := fmt.Sprintf("127.0.0.1:%d", transportPort)
+		socksAddr := fmt.Sprintf("127.0.0.1:%d", exposedPort)
+
+		sshCfg := sshtunnel.Config{
+			TransportAddr: transportAddr,
+			SOCKSAddr:     socksAddr,
+			User:          tc.SSH.User,
+			Password:      tc.SSH.Password,
+			KeyPath:       tc.SSH.Key,
+		}
+
+		go func() {
+			if err := waitForPort(transportAddr, 10*time.Second); err != nil {
+				fmt.Printf("warning: transport for %q did not become ready: %v\n", tag, err)
+				e.procMgr.Stop(processName)
+				return
+			}
+
+			st, err := sshtunnel.Start(sshCfg)
+			if err != nil {
+				fmt.Printf("warning: SSH tunnel %q failed: %v\n", tag, err)
+				e.procMgr.Stop(processName)
+				return
+			}
+
+			e.mu.Lock()
+			e.sshTunnels[tag] = st
+			e.mu.Unlock()
+		}()
 	}
 
 	return nil
@@ -389,6 +469,14 @@ func (e *Engine) resolveActiveTarget() string {
 		return ""
 	}
 
+	// For SSH backend, verify the SSH tunnel is alive
+	if tc.Backend == config.BackendSSH {
+		st, ok := e.sshTunnels[activeTag]
+		if !ok || !st.IsAlive() {
+			return ""
+		}
+	}
+
 	return fmt.Sprintf("127.0.0.1:%d", tunnelPort)
 }
 
@@ -406,7 +494,22 @@ func (e *Engine) hasRunningTunnelsLocked() bool {
 			return true
 		}
 	}
-	return false
+	// Also check SSH tunnels (they run in-process, not as child processes)
+	return len(e.sshTunnels) > 0
+}
+
+// waitForPort polls a TCP address until it accepts connections or the timeout expires.
+func waitForPort(addr string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for %s", addr)
 }
 
 func extractPort(addr string) int {

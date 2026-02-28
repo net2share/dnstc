@@ -85,26 +85,9 @@ func HandleTunnelAdd(ctx *actions.Context) error {
 	// Transport-specific config
 	switch transportType {
 	case config.TransportSlipstream:
-		if backendType == config.BackendShadowsocks {
-			ssServer := ctx.GetString("ss-server")
-			ssPassword := ctx.GetString("ss-password")
-			ssMethod := ctx.GetString("ss-method")
-			if ssServer == "" || ssPassword == "" {
-				return fmt.Errorf("--ss-server and --ss-password are required for Shadowsocks backend")
-			}
-			if ssMethod == "" {
-				ssMethod = "chacha20-ietf-poly1305"
-			}
-			tc.Shadowsocks = &config.ShadowsocksConfig{
-				Server:   ssServer,
-				Password: ssPassword,
-				Method:   ssMethod,
-			}
-		} else {
-			cert := ctx.GetString("cert")
-			if cert != "" {
-				tc.Slipstream = &config.SlipstreamConfig{Cert: cert}
-			}
+		cert := ctx.GetString("cert")
+		if cert != "" {
+			tc.Slipstream = &config.SlipstreamConfig{Cert: cert}
 		}
 	case config.TransportDNSTT:
 		pubkey := ctx.GetString("pubkey")
@@ -115,6 +98,40 @@ func HandleTunnelAdd(ctx *actions.Context) error {
 			return fmt.Errorf("public key must be 64 hex characters")
 		}
 		tc.DNSTT = &config.DNSTTConfig{Pubkey: pubkey}
+	}
+
+	// Backend-specific config
+	switch backendType {
+	case config.BackendShadowsocks:
+		ssServer := ctx.GetString("ss-server")
+		ssPassword := ctx.GetString("ss-password")
+		ssMethod := ctx.GetString("ss-method")
+		if ssServer == "" || ssPassword == "" {
+			return fmt.Errorf("--ss-server and --ss-password are required for Shadowsocks backend")
+		}
+		if ssMethod == "" {
+			ssMethod = "chacha20-ietf-poly1305"
+		}
+		tc.Shadowsocks = &config.ShadowsocksConfig{
+			Server:   ssServer,
+			Password: ssPassword,
+			Method:   ssMethod,
+		}
+	case config.BackendSSH:
+		sshUser := ctx.GetString("ssh-user")
+		sshPassword := ctx.GetString("ssh-password")
+		sshKey := ctx.GetString("ssh-key")
+		if sshUser == "" {
+			return fmt.Errorf("--ssh-user is required for SSH backend")
+		}
+		if sshPassword == "" && sshKey == "" {
+			return fmt.Errorf("--ssh-password or --ssh-key is required for SSH backend")
+		}
+		tc.SSH = &config.SSHConfig{
+			User:     sshUser,
+			Password: sshPassword,
+			Key:      sshKey,
+		}
 	}
 
 	// Add to config

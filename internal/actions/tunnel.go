@@ -83,6 +83,26 @@ func init() {
 		},
 	})
 
+	// tunnel import
+	Register(&Action{
+		ID:        ActionTunnelImport,
+		Parent:    ActionTunnel,
+		Use:       "import",
+		Short:     "Import a tunnel from a dnstm:// URL",
+		Long:      "Import a tunnel configuration from a shared dnstm:// URL",
+		MenuLabel: "Import",
+		Inputs: []InputField{
+			{
+				Name:        "url",
+				Label:       "URL",
+				Type:        InputTypeText,
+				Required:    true,
+				Placeholder: "dnstm://...",
+				Description: "The dnstm:// URL to import",
+			},
+		},
+	})
+
 	// tunnel add
 	Register(&Action{
 		ID:        ActionTunnelAdd,
@@ -167,7 +187,7 @@ func init() {
 				Description: "Slipstream certificate path (optional)",
 				ShowIf: func(ctx *Context) bool {
 					return config.TransportType(ctx.GetString("transport")) == config.TransportSlipstream &&
-						config.BackendType(ctx.GetString("backend")) == config.BackendSOCKS
+						config.BackendType(ctx.GetString("backend")) != config.BackendShadowsocks
 				},
 			},
 			{
@@ -197,6 +217,33 @@ func init() {
 				Description: "Shadowsocks encryption method",
 				ShowIf: func(ctx *Context) bool {
 					return config.BackendType(ctx.GetString("backend")) == config.BackendShadowsocks
+				},
+			},
+			{
+				Name:        "ssh-user",
+				Label:       "SSH User",
+				Type:        InputTypeText,
+				Description: "SSH username",
+				ShowIf: func(ctx *Context) bool {
+					return config.BackendType(ctx.GetString("backend")) == config.BackendSSH
+				},
+			},
+			{
+				Name:        "ssh-password",
+				Label:       "SSH Password",
+				Type:        InputTypePassword,
+				Description: "SSH password",
+				ShowIf: func(ctx *Context) bool {
+					return config.BackendType(ctx.GetString("backend")) == config.BackendSSH
+				},
+			},
+			{
+				Name:        "ssh-key",
+				Label:       "SSH Key Path",
+				Type:        InputTypeText,
+				Description: "Path to SSH private key file",
+				ShowIf: func(ctx *Context) bool {
+					return config.BackendType(ctx.GetString("backend")) == config.BackendSSH
 				},
 			},
 		},

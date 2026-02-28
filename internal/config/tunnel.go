@@ -13,6 +13,7 @@ type BackendType string
 
 const (
 	BackendSOCKS       BackendType = "socks"
+	BackendSSH         BackendType = "ssh"
 	BackendShadowsocks BackendType = "shadowsocks"
 )
 
@@ -28,6 +29,7 @@ type TunnelConfig struct {
 	Slipstream  *SlipstreamConfig  `json:"slipstream,omitempty"`
 	DNSTT       *DNSTTConfig       `json:"dnstt,omitempty"`
 	Shadowsocks *ShadowsocksConfig `json:"shadowsocks,omitempty"`
+	SSH         *SSHConfig         `json:"ssh,omitempty"`
 }
 
 // SlipstreamConfig holds Slipstream-specific configuration.
@@ -45,6 +47,13 @@ type ShadowsocksConfig struct {
 	Server   string `json:"server"`
 	Password string `json:"password"`
 	Method   string `json:"method,omitempty"`
+}
+
+// SSHConfig holds SSH backend configuration.
+type SSHConfig struct {
+	User     string `json:"user"`
+	Password string `json:"password,omitempty"`
+	Key      string `json:"key,omitempty"` // path to PEM private key file
 }
 
 // IsEnabled returns true if the tunnel is enabled.
@@ -79,6 +88,8 @@ func GetBackendTypeDisplayName(b BackendType) string {
 	switch b {
 	case BackendSOCKS:
 		return "SOCKS"
+	case BackendSSH:
+		return "SSH"
 	case BackendShadowsocks:
 		return "Shadowsocks"
 	default:
@@ -98,6 +109,7 @@ func GetTransportTypes() []TransportType {
 func GetBackendTypes() []BackendType {
 	return []BackendType{
 		BackendSOCKS,
+		BackendSSH,
 		BackendShadowsocks,
 	}
 }
