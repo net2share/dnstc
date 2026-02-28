@@ -40,6 +40,11 @@ func BackendOptionsForTransport(ctx *Context) []SelectOption {
 				Value:       string(config.BackendSOCKS),
 				Description: "Slipstream standalone SOCKS proxy",
 			},
+			{
+				Label:       "SSH",
+				Value:       string(config.BackendSSH),
+				Description: "SSH dynamic forwarding over Slipstream",
+			},
 		}
 	case config.TransportDNSTT:
 		return []SelectOption{
@@ -47,6 +52,11 @@ func BackendOptionsForTransport(ctx *Context) []SelectOption {
 				Label:       "SOCKS (standalone)",
 				Value:       string(config.BackendSOCKS),
 				Description: "DNSTT with SOCKS proxy",
+			},
+			{
+				Label:       "SSH",
+				Value:       string(config.BackendSSH),
+				Description: "SSH dynamic forwarding over DNSTT",
 			},
 		}
 	default:

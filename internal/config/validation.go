@@ -57,7 +57,7 @@ func (c *Config) validateTunnels() error {
 			return fmt.Errorf("tunnel '%s': backend is required", t.Tag)
 		}
 
-		if t.Backend != BackendSOCKS && t.Backend != BackendShadowsocks {
+		if t.Backend != BackendSOCKS && t.Backend != BackendSSH && t.Backend != BackendShadowsocks {
 			return fmt.Errorf("tunnel '%s': unknown backend %s", t.Tag, t.Backend)
 		}
 
@@ -96,6 +96,18 @@ func (c *Config) validateTunnels() error {
 			}
 			if err := validateShadowsocksMethod(t.Shadowsocks.Method); err != nil {
 				return fmt.Errorf("tunnel '%s': %w", t.Tag, err)
+			}
+		}
+
+		if t.Backend == BackendSSH {
+			if t.SSH == nil {
+				return fmt.Errorf("tunnel '%s': ssh config is required", t.Tag)
+			}
+			if t.SSH.User == "" {
+				return fmt.Errorf("tunnel '%s': ssh.user is required", t.Tag)
+			}
+			if t.SSH.Password == "" && t.SSH.Key == "" {
+				return fmt.Errorf("tunnel '%s': ssh.password or ssh.key is required", t.Tag)
 			}
 		}
 	}

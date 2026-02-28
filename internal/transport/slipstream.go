@@ -27,7 +27,7 @@ func (p *SlipstreamProvider) DisplayName() string {
 
 // SupportedBackends returns the backend types this transport supports.
 func (p *SlipstreamProvider) SupportedBackends() []config.BackendType {
-	return []config.BackendType{config.BackendSOCKS, config.BackendShadowsocks}
+	return []config.BackendType{config.BackendSOCKS, config.BackendSSH, config.BackendShadowsocks}
 }
 
 // RequiredBinaries returns the binaries required for this transport.
@@ -35,7 +35,7 @@ func (p *SlipstreamProvider) RequiredBinaries(backend config.BackendType) []stri
 	switch backend {
 	case config.BackendShadowsocks:
 		return []string{binaries.NameShadowsocks, binaries.NameSlipstream}
-	default:
+	default: // SOCKS, SSH
 		return []string{binaries.NameSlipstream}
 	}
 }
@@ -73,7 +73,7 @@ func (p *SlipstreamProvider) BuildArgs(tc *config.TunnelConfig, listenPort int, 
 	switch tc.Backend {
 	case config.BackendShadowsocks:
 		return p.buildSIP003Args(tc, listenPort, resolver)
-	default:
+	default: // SOCKS, SSH — raw TCP tunnel
 		return p.buildSOCKSArgs(tc, listenPort, resolver)
 	}
 }

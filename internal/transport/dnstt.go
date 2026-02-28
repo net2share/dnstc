@@ -26,7 +26,7 @@ func (p *DNSTTProvider) DisplayName() string {
 
 // SupportedBackends returns the backend types this transport supports.
 func (p *DNSTTProvider) SupportedBackends() []config.BackendType {
-	return []config.BackendType{config.BackendSOCKS}
+	return []config.BackendType{config.BackendSOCKS, config.BackendSSH}
 }
 
 // RequiredBinaries returns the binaries required for this transport.
