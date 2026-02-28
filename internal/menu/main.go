@@ -332,6 +332,7 @@ func runTunnelMenu() error {
 	for {
 		options := []tui.MenuOption{
 			{Label: "Add", Value: actions.ActionTunnelAdd},
+			{Label: "Import", Value: actions.ActionTunnelImport},
 			{Label: "List →", Value: "list"},
 			{Label: "Back", Value: "back"},
 		}
@@ -351,7 +352,16 @@ func runTunnelMenu() error {
 					_ = tui.ShowMessage(tui.AppMessage{Type: "error", Message: err.Error()})
 				}
 			} else {
-				// Reload engine config after adding a tunnel
+				if eng := engine.Get(); eng != nil {
+					eng.ReloadConfig()
+				}
+			}
+		case actions.ActionTunnelImport:
+			if err := RunAction(actions.ActionTunnelImport); err != nil {
+				if err != errCancelled {
+					_ = tui.ShowMessage(tui.AppMessage{Type: "error", Message: err.Error()})
+				}
+			} else {
 				if eng := engine.Get(); eng != nil {
 					eng.ReloadConfig()
 				}
