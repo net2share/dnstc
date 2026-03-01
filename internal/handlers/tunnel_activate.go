@@ -5,6 +5,7 @@ import (
 
 	"github.com/net2share/dnstc/internal/actions"
 	"github.com/net2share/dnstc/internal/engine"
+	"github.com/net2share/dnstc/internal/ipc"
 )
 
 func init() {
@@ -32,10 +33,16 @@ func HandleTunnelActivate(ctx *actions.Context) error {
 		return nil
 	}
 
-	// If engine is running, use it (updates in-memory config + saves).
-	// Otherwise, just update config on disk.
+	// If engine is running locally, use it (updates in-memory config + saves).
+	// Otherwise, try IPC to a running daemon.
+	// Fallback: update config on disk only.
 	if eng := engine.Get(); eng != nil {
 		if err := eng.ActivateTunnel(tag); err != nil {
+			return fmt.Errorf("failed to activate tunnel: %w", err)
+		}
+	} else if running, client := ipc.DetectDaemon(); running {
+		defer client.Close()
+		if err := client.ActivateTunnel(tag); err != nil {
 			return fmt.Errorf("failed to activate tunnel: %w", err)
 		}
 	} else {

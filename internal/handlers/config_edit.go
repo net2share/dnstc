@@ -34,5 +34,9 @@ func HandleConfigEdit(ctx *actions.Context) error {
 	editorCmd.Stdin = os.Stdin
 	editorCmd.Stdout = os.Stdout
 	editorCmd.Stderr = os.Stderr
-	return editorCmd.Run()
+	if err := editorCmd.Run(); err != nil {
+		return err
+	}
+	NotifyDaemonReload()
+	return nil
 }

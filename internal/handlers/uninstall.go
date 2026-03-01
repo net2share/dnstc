@@ -11,7 +11,6 @@ import (
 	"github.com/net2share/dnstc/internal/config"
 	"github.com/net2share/dnstc/internal/engine"
 	"github.com/net2share/dnstc/internal/ipc"
-	"github.com/net2share/dnstc/internal/process"
 )
 
 const (
@@ -27,7 +26,7 @@ func init() {
 func HandleUninstall(ctx *actions.Context) error {
 	beginProgress(ctx, "Uninstall dnstc")
 
-	totalSteps := 6
+	totalSteps := 5
 	currentStep := 0
 
 	// Step 1: Stop daemon if running
@@ -45,14 +44,7 @@ func HandleUninstall(ctx *actions.Context) error {
 		ctx.Output.Status("No daemon running")
 	}
 
-	// Step 2: Stop orphan processes
-	currentStep++
-	ctx.Output.Step(currentStep, totalSteps, "Cleaning up orphan processes...")
-	mgr := process.NewManager(config.StatePath())
-	mgr.StopAll()
-	ctx.Output.Status("Orphan processes cleaned")
-
-	// Step 3: Remove systemd unit if installed
+	// Step 2: Remove systemd unit if installed
 	currentStep++
 	ctx.Output.Step(currentStep, totalSteps, "Removing systemd service...")
 	if runtime.GOOS == "linux" {
@@ -69,7 +61,7 @@ func HandleUninstall(ctx *actions.Context) error {
 		ctx.Output.Status("Skipped (not Linux)")
 	}
 
-	// Step 4: Remove downloaded binaries
+	// Step 3: Remove downloaded binaries
 	currentStep++
 	ctx.Output.Step(currentStep, totalSteps, "Removing downloaded binaries...")
 	binMgr := binaries.NewManager()
@@ -80,13 +72,13 @@ func HandleUninstall(ctx *actions.Context) error {
 	os.Remove(config.BinDir())
 	ctx.Output.Status("Binaries removed")
 
-	// Step 5: Remove configuration directory
+	// Step 4: Remove configuration directory
 	currentStep++
 	ctx.Output.Step(currentStep, totalSteps, "Removing configuration...")
 	os.RemoveAll(config.ConfigDir())
 	ctx.Output.Status("Configuration removed")
 
-	// Step 6: Remove data directory
+	// Step 5: Remove data directory
 	currentStep++
 	ctx.Output.Step(currentStep, totalSteps, "Removing data files...")
 	os.RemoveAll(filepath.Dir(config.BinDir()))

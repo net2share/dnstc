@@ -6,6 +6,7 @@ import (
 	"github.com/net2share/dnstc/internal/actions"
 	"github.com/net2share/dnstc/internal/config"
 	"github.com/net2share/dnstc/internal/engine"
+	"github.com/net2share/dnstc/internal/ipc"
 )
 
 func init() {
@@ -33,11 +34,15 @@ func HandleTunnelRemove(ctx *actions.Context) error {
 	totalSteps := 3
 	currentStep := 0
 
-	// Step 1: Stop if running (via engine if available)
+	// Step 1: Stop if running (via engine or IPC)
 	currentStep++
 	ctx.Output.Step(currentStep, totalSteps, "Stopping tunnel...")
 	if eng := engine.Get(); eng != nil {
 		eng.StopTunnel(tag)
+	} else if running, client := ipc.DetectDaemon(); running {
+		client.StopTunnel(tag)
+		client.ReloadConfig()
+		client.Close()
 	}
 	ctx.Output.Status("Tunnel stopped")
 

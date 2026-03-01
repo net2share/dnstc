@@ -100,9 +100,9 @@ func buildTunnelSummary() string {
 		// No daemon — load config from disk for tunnel count
 		cfg, err := config.LoadOrDefault()
 		if err != nil || len(cfg.Tunnels) == 0 {
-			return "Disconnected"
+			return "Service not running"
 		}
-		return fmt.Sprintf("Disconnected | Tunnels: %d", len(cfg.Tunnels))
+		return fmt.Sprintf("Service not running | Tunnels: %d", len(cfg.Tunnels))
 	}
 
 	cfg := eng.GetConfig()
@@ -169,12 +169,9 @@ func runMainMenu() error {
 		installed := binaries.AreInstalled()
 
 		if installed {
-			// Check live state for Connect/Disconnect
-			eng := engine.Get()
-			if eng != nil && eng.IsConnected() {
-				options = append(options, tui.MenuOption{Label: "Disconnect", Value: "disconnect"})
-			} else {
-				options = append(options, tui.MenuOption{Label: "Connect", Value: "connect"})
+			// Show service status when daemon is connected
+			if daemonMode {
+				options = append(options, tui.MenuOption{Label: "Service Status", Value: "service-status"})
 			}
 
 			options = append(options, tui.MenuOption{Label: "Tunnels →", Value: actions.ActionTunnel})
@@ -214,10 +211,8 @@ func runMainMenu() error {
 
 func handleMainMenuChoice(choice string) error {
 	switch choice {
-	case "connect":
-		return handleConnect()
-	case "disconnect":
-		return handleDisconnect()
+	case "service-status":
+		return handleServiceStatus()
 	case actions.ActionTunnel:
 		return runTunnelMenu()
 	case actions.ActionConfig:
@@ -245,41 +240,14 @@ func handleMainMenuChoice(choice string) error {
 	return nil
 }
 
-func handleConnect() error {
-	// Check if tunnels exist before forking a daemon
-	cfg, err := config.LoadOrDefault()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	if len(cfg.Tunnels) == 0 {
-		_ = tui.ShowMessage(tui.AppMessage{Type: "info", Message: "No tunnels configured. Add one first."})
-		return errCancelled
+func handleServiceStatus() error {
+	eng := engine.Get()
+	if eng == nil {
+		_ = tui.ShowMessage(tui.AppMessage{Type: "info", Message: "Service not running. Start with: dnstc daemon start"})
+		return nil
 	}
 
-	pv := tui.NewProgressView("Connecting")
-	pv.AddInfo("Starting daemon...")
-
-	// Fork daemon if needed, get connected client
-	client, err := ipc.EnsureDaemon()
-	if err != nil {
-		pv.AddError(fmt.Sprintf("Failed to start daemon: %v", err))
-		pv.Done()
-		return fmt.Errorf("failed to start daemon: %w", err)
-	}
-
-	// Set daemon mode
-	daemonMode = true
-	daemonClient = client
-	engine.Set(client)
-
-	// Start tunnels via IPC
-	if err := client.Start(); err != nil {
-		pv.AddError(fmt.Sprintf("Failed to connect: %v", err))
-		pv.Done()
-		return fmt.Errorf("failed to connect: %w", err)
-	}
-
-	status := client.Status()
+	status := eng.Status()
 	running := 0
 	for _, ts := range status.Tunnels {
 		if ts.Running {
@@ -287,43 +255,14 @@ func handleConnect() error {
 		}
 	}
 
-	if running == 0 {
-		client.Stop()
-		client.Shutdown()
-		client.Close()
-		daemonMode = false
-		daemonClient = nil
-		engine.Set(nil)
-		pv.AddError("No tunnels could be started")
-		pv.Done()
-		return fmt.Errorf("no tunnels could be started")
+	msg := fmt.Sprintf("Service running — %d/%d tunnel(s) active", running, len(status.Tunnels))
+	if status.GatewayAddr != "" {
+		msg += fmt.Sprintf("\nGateway: %s", status.GatewayAddr)
 	}
-
-	pv.AddSuccess(fmt.Sprintf("Connected — %d tunnel(s) running", running))
-	pv.Done()
-	return nil
-}
-
-func handleDisconnect() error {
-	eng := engine.Get()
-	if eng == nil {
-		return fmt.Errorf("not connected")
+	if status.DNSProxyAddr != "" {
+		msg += fmt.Sprintf("\nDNS Proxy: %s", status.DNSProxyAddr)
 	}
-
-	// Stop tunnels via IPC
-	eng.Stop()
-
-	// Shutdown daemon process
-	if daemonClient != nil {
-		daemonClient.Shutdown()
-		daemonClient.Close()
-	}
-
-	daemonMode = false
-	daemonClient = nil
-	engine.Set(nil)
-
-	_ = tui.ShowMessage(tui.AppMessage{Type: "success", Message: "Disconnected"})
+	_ = tui.ShowMessage(tui.AppMessage{Type: "info", Message: msg})
 	return nil
 }
 

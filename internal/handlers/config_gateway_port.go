@@ -6,6 +6,7 @@ import (
 	"github.com/net2share/dnstc/internal/actions"
 	"github.com/net2share/dnstc/internal/config"
 	"github.com/net2share/dnstc/internal/engine"
+	"github.com/net2share/dnstc/internal/ipc"
 )
 
 func init() {
@@ -53,6 +54,13 @@ func HandleConfigGatewayPort(ctx *actions.Context) error {
 			return fmt.Errorf("failed to restart: %w", err)
 		}
 		ctx.Output.Success("Gateway restarted on new port")
+	} else if running, client := ipc.DetectDaemon(); running {
+		ctx.Output.Info("Restarting daemon...")
+		client.Stop()
+		client.ReloadConfig()
+		client.Start()
+		client.Close()
+		ctx.Output.Success("Daemon restarted on new port")
 	}
 
 	return nil

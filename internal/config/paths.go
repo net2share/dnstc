@@ -64,11 +64,6 @@ func SocketPath() string {
 	return filepath.Join(ConfigDir(), "engine.sock")
 }
 
-// DaemonLogPath returns the path to the daemon log file.
-func DaemonLogPath() string {
-	return filepath.Join(ConfigDir(), "daemon.log")
-}
-
 // VersionsPath returns the path to the binary version manifest.
 func VersionsPath() string {
 	return filepath.Join(ConfigDir(), "versions.json")

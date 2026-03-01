@@ -2,7 +2,9 @@
 package binaries
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/net2share/dnstc/internal/config"
 	"github.com/net2share/go-corelib/binman"
@@ -27,8 +29,8 @@ func Defs() map[string]binman.BinaryDef {
 			Name:          NameSlipstream,
 			EnvOverride:   "DNSTC_SLIPSTREAM_PATH",
 			URLPattern:    "https://github.com/net2share/slipstream-rust-build/releases/download/{version}/slipstream-client-{os}-{arch}",
-			PinnedVersion: "latest",
-			ChecksumURL:   "https://github.com/net2share/slipstream-rust-build/releases/download/{version}/checksums.sha256",
+			PinnedVersion: "v2026.02.22.1",
+			ChecksumURL:   "https://github.com/net2share/slipstream-rust-build/releases/download/{version}/SHA256SUMS",
 		},
 		NameDNSTT: {
 			Name:          NameDNSTT,
@@ -41,7 +43,7 @@ func Defs() map[string]binman.BinaryDef {
 			Name:          NameShadowsocks,
 			EnvOverride:   "DNSTC_SSLOCAL_PATH",
 			URLPattern:    "https://github.com/shadowsocks/shadowsocks-rust/releases/download/{version}/shadowsocks-{version}.{ssarch}.tar.xz",
-			PinnedVersion: "v1.21.2",
+			PinnedVersion: "v1.24.0",
 			Archive:       true,
 			ChecksumURL:   "https://github.com/shadowsocks/shadowsocks-rust/releases/download/{version}/shadowsocks-{version}.{ssarch}.tar.xz.sha256",
 			ArchMappings: map[string]binman.ArchMapping{
@@ -69,6 +71,39 @@ var systemPaths = []string{
 // NewManager creates a binman.Manager configured for dnstc.
 func NewManager() *binman.Manager {
 	return binman.NewManager(config.BinDir(), binman.WithSystemPaths(systemPaths))
+}
+
+// EnvPath returns the local path from the binary's env override variable,
+// or empty string if not set or the file doesn't exist.
+func EnvPath(def binman.BinaryDef) string {
+	if def.EnvOverride != "" {
+		if p := os.Getenv(def.EnvOverride); p != "" {
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	}
+	return ""
+}
+
+// CopyToBinDir copies a binary from srcPath into the managed bin directory.
+func CopyToBinDir(def binman.BinaryDef, srcPath string) error {
+	binDir := config.BinDir()
+	if err := os.MkdirAll(binDir, 0750); err != nil {
+		return fmt.Errorf("failed to create bin directory: %w", err)
+	}
+
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", srcPath, err)
+	}
+
+	destPath := filepath.Join(binDir, def.Name)
+	if err := os.WriteFile(destPath, data, 0755); err != nil {
+		return fmt.Errorf("failed to copy %s: %w", def.Name, err)
+	}
+
+	return nil
 }
 
 // AreInstalled returns true if 'dnstc install' has been run.

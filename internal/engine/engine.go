@@ -293,7 +293,7 @@ func (e *Engine) startTunnelLocked(tag string) error {
 
 	processName := "tunnel-" + tag
 	if e.procMgr.IsRunning(processName) {
-		return fmt.Errorf("tunnel %q is already running", tag)
+		return nil // already running, skip
 	}
 
 	// Get transport provider

@@ -5,15 +5,16 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/net2share/dnstc/internal/binaries"
 	"github.com/net2share/dnstc/internal/config"
 	"github.com/net2share/dnstc/internal/engine"
 	"github.com/net2share/dnstc/internal/ipc"
-	"github.com/net2share/dnstc/internal/process"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +23,7 @@ var daemonCmd = &cobra.Command{
 	Short: "Manage the background daemon",
 }
 
-// daemonRunCmd is the hidden foreground process used by daemon start and systemd.
+// daemonRunCmd is the hidden foreground process used by systemd ExecStart.
 var daemonRunCmd = &cobra.Command{
 	Use:    "run",
 	Short:  "Run the daemon in the foreground",
@@ -59,6 +60,11 @@ var daemonRunCmd = &cobra.Command{
 		}
 		defer srv.Stop()
 
+		// Auto-start tunnels so they come up after reboot
+		if err := eng.Start(); err != nil {
+			fmt.Printf("Warning: failed to auto-start tunnels: %v\n", err)
+		}
+
 		fmt.Printf("Daemon ready (socket: %s)\n", socketPath)
 
 		// Wait for signal or shutdown request
@@ -80,66 +86,71 @@ var daemonRunCmd = &cobra.Command{
 
 var daemonStartCmd = &cobra.Command{
 	Use:   "start",
-	Short: "Start the daemon in the background",
+	Short: "Start the daemon and tunnels",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if !binaries.AreInstalled() {
-			return fmt.Errorf("binaries not installed — run 'dnstc install' first")
-		}
-
-		// Check if already running
+		// If daemon already running, start tunnels via IPC
 		if running, client := ipc.DetectDaemon(); running {
-			status := client.Status()
-			client.Close()
-			runCount := 0
-			for _, ts := range status.Tunnels {
-				if ts.Running {
-					runCount++
+			return startTunnels(client)
+		}
+
+		// No daemon — try systemd on Linux
+		if runtime.GOOS == "linux" {
+			if _, err := os.Stat(systemdUnitPath); err == nil {
+				fmt.Println("Starting service...")
+				if err := runSystemctl("start", systemdServiceName); err != nil {
+					return fmt.Errorf("failed to start service: %w", err)
 				}
-			}
-			fmt.Printf("Daemon already running (%d tunnel(s) active)\n", runCount)
-			return nil
-		}
 
-		fmt.Println("Starting daemon...")
-		client, err := ipc.EnsureDaemon()
-		if err != nil {
-			return err
-		}
-		defer client.Close()
-
-		// Check if there are tunnels to start
-		cfg := client.GetConfig()
-		if len(cfg.Tunnels) == 0 {
-			fmt.Println("Daemon started (no tunnels configured)")
-			return nil
-		}
-
-		// Start tunnels via IPC
-		if err := client.Start(); err != nil {
-			return fmt.Errorf("failed to start tunnels: %w", err)
-		}
-
-		// Print status
-		status := client.Status()
-		runCount := 0
-		for _, ts := range status.Tunnels {
-			if ts.Running {
-				runCount++
-				fmt.Printf("  tunnel %s running on :%d\n", ts.Tag, ts.Port)
+				// Poll IPC for readiness
+				deadline := time.Now().Add(10 * time.Second)
+				for time.Now().Before(deadline) {
+					time.Sleep(200 * time.Millisecond)
+					if running, client := ipc.DetectDaemon(); running {
+						return startTunnels(client)
+					}
+				}
+				return fmt.Errorf("daemon did not become ready within 10s — check 'journalctl -u dnstc'")
 			}
 		}
-		if status.GatewayAddr != "" {
-			fmt.Printf("  gateway: %s\n", status.GatewayAddr)
-		}
-		fmt.Printf("Started (%d tunnel(s) running)\n", runCount)
-		return nil
+
+		return fmt.Errorf("no daemon running — start with 'dnstc daemon run' or install the service with 'sudo dnstc daemon enable'")
 	},
+}
+
+// startTunnels starts tunnels on a connected daemon and prints status.
+func startTunnels(client *ipc.Client) error {
+	defer client.Close()
+
+	cfg := client.GetConfig()
+	if len(cfg.Tunnels) == 0 {
+		fmt.Println("Daemon running (no tunnels configured)")
+		return nil
+	}
+
+	if err := client.Start(); err != nil {
+		return fmt.Errorf("failed to start tunnels: %w", err)
+	}
+
+	status := client.Status()
+	runCount := 0
+	for _, ts := range status.Tunnels {
+		if ts.Running {
+			runCount++
+			fmt.Printf("  tunnel %s running on :%d\n", ts.Tag, ts.Port)
+		}
+	}
+	if status.GatewayAddr != "" {
+		fmt.Printf("  gateway: %s\n", status.GatewayAddr)
+	}
+	fmt.Printf("Started (%d tunnel(s) running)\n", runCount)
+	return nil
 }
 
 var daemonStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Try IPC shutdown first (daemon exits cleanly, Restart=on-failure won't restart)
 		if running, client := ipc.DetectDaemon(); running {
 			fmt.Println("Stopping daemon...")
 			client.Stop()
@@ -149,25 +160,17 @@ var daemonStopCmd = &cobra.Command{
 			return nil
 		}
 
-		// No daemon — check for orphan processes
-		mgr := process.NewManager(config.StatePath())
-		status := mgr.GetStatus()
-
-		orphans := 0
-		for _, alive := range status {
-			if alive {
-				orphans++
+		// Fallback: check if systemd service is active (e.g. running as different user)
+		if runtime.GOOS == "linux" && isServiceActive() {
+			fmt.Println("Stopping service via systemctl...")
+			if err := runSystemctl("stop", systemdServiceName); err != nil {
+				return fmt.Errorf("failed to stop service: %w", err)
 			}
-		}
-
-		if orphans == 0 {
-			fmt.Println("Nothing is running.")
+			fmt.Println("Stopped.")
 			return nil
 		}
 
-		fmt.Printf("Stopping %d orphan process(es)...\n", orphans)
-		mgr.StopAll()
-		fmt.Println("Stopped.")
+		fmt.Println("Nothing is running.")
 		return nil
 	},
 }
@@ -176,6 +179,7 @@ var daemonStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show daemon status",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Try IPC for detailed status
 		if running, client := ipc.DetectDaemon(); running {
 			status := client.Status()
 			client.Close()
@@ -208,27 +212,21 @@ var daemonStatusCmd = &cobra.Command{
 			return nil
 		}
 
-		// No daemon — check for orphans
-		mgr := process.NewManager(config.StatePath())
-		status := mgr.GetStatus()
-
-		orphans := 0
-		for name, alive := range status {
-			if alive {
-				orphans++
-				info := mgr.GetProcessInfo(name)
-				if info != nil {
-					fmt.Printf("  orphan: %s (pid %d)\n", name, info.PID)
-				}
+		// No IPC — check systemd service state
+		if runtime.GOOS == "linux" {
+			if isServiceActive() {
+				fmt.Println("Service is active but IPC is not responding.")
+				fmt.Println("Check logs: journalctl -u dnstc")
+				return nil
+			}
+			if _, err := os.Stat(systemdUnitPath); os.IsNotExist(err) {
+				fmt.Println("No daemon running.")
+				fmt.Println("Install the service: sudo dnstc daemon enable")
+				return nil
 			}
 		}
 
-		if orphans == 0 {
-			fmt.Println("No daemon running.")
-		} else {
-			fmt.Printf("No daemon running, but %d orphan process(es) found.\n", orphans)
-			fmt.Println("Run 'dnstc daemon stop' to clean them up.")
-		}
+		fmt.Println("No daemon running.")
 		return nil
 	},
 }
@@ -240,6 +238,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=%s
 ExecStart=%s daemon run
 Restart=on-failure
 RestartSec=5
@@ -257,9 +256,6 @@ var daemonEnableCmd = &cobra.Command{
 	Use:   "enable",
 	Short: "Install and enable the systemd service (Linux only)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if !binaries.AreInstalled() {
-			return fmt.Errorf("binaries not installed — run 'dnstc install' first")
-		}
 		if runtime.GOOS != "linux" {
 			return fmt.Errorf("service management is only supported on Linux")
 		}
@@ -276,7 +272,17 @@ var daemonEnableCmd = &cobra.Command{
 			return fmt.Errorf("failed to resolve binary path: %w", err)
 		}
 
-		unit := fmt.Sprintf(systemdUnit, binPath)
+		// Resolve the invoking user (sudo sets SUDO_USER)
+		username := os.Getenv("SUDO_USER")
+		if username == "" {
+			u, err := user.Current()
+			if err != nil {
+				return fmt.Errorf("could not determine current user: %w", err)
+			}
+			username = u.Username
+		}
+
+		unit := fmt.Sprintf(systemdUnit, username, binPath)
 		if err := os.WriteFile(systemdUnitPath, []byte(unit), 0644); err != nil {
 			return fmt.Errorf("failed to write unit file: %w", err)
 		}
@@ -289,7 +295,7 @@ var daemonEnableCmd = &cobra.Command{
 		}
 
 		fmt.Println("Service installed and enabled.")
-		fmt.Println("Start with: sudo systemctl start dnstc")
+		fmt.Println("Start with: dnstc daemon start")
 		return nil
 	},
 }
@@ -327,6 +333,11 @@ func runSystemctl(args ...string) error {
 		return fmt.Errorf("systemctl %v failed: %w", args, err)
 	}
 	return nil
+}
+
+// isServiceActive checks if the systemd service is currently active.
+func isServiceActive() bool {
+	return exec.Command("systemctl", "is-active", "--quiet", systemdServiceName).Run() == nil
 }
 
 func init() {

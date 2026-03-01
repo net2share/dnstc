@@ -33,6 +33,18 @@ func HandleInstall(ctx *actions.Context) error {
 			continue
 		}
 
+		// Copy from local path if provided via env var
+		if localPath := binaries.EnvPath(def); localPath != "" {
+			ctx.Output.Step(step, total, fmt.Sprintf("Copying %s from %s...", name, localPath))
+			if err := binaries.CopyToBinDir(def, localPath); err != nil {
+				ctx.Output.Error(fmt.Sprintf("Failed to copy %s: %v", name, err))
+				continue
+			}
+			manifest.SetVersion(name, def.PinnedVersion)
+			ctx.Output.Status(fmt.Sprintf("%s installed from local path", name))
+			continue
+		}
+
 		if mgr.IsInstalled(def) {
 			ctx.Output.Step(step, total, fmt.Sprintf("%s already installed", name))
 			manifest.SetVersion(name, def.PinnedVersion)

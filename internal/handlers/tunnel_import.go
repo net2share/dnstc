@@ -139,6 +139,7 @@ func HandleTunnelImport(ctx *actions.Context) error {
 	if err := cfg.Save(); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
+	NotifyDaemonReload()
 
 	ctx.Output.Success(fmt.Sprintf("Tunnel '%s' imported!", tag))
 	ctx.Output.Status(fmt.Sprintf("Transport: %s", config.GetTransportTypeDisplayName(transportType)))
