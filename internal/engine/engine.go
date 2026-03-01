@@ -3,7 +3,6 @@
 package engine
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"strconv"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/net2share/dnstc/internal/binaries"
 	"github.com/net2share/dnstc/internal/config"
-	"github.com/net2share/dnstc/internal/dnsproxy"
 	"github.com/net2share/dnstc/internal/gateway"
 	"github.com/net2share/dnstc/internal/port"
 	"github.com/net2share/dnstc/internal/process"
@@ -42,10 +40,9 @@ func Get() EngineController {
 
 // Status represents the current state of all tunnels and the gateway.
 type Status struct {
-	Active       string                   `json:"active"`
-	GatewayAddr  string                   `json:"gateway_addr"`
-	DNSProxyAddr string                   `json:"dns_proxy_addr"`
-	Tunnels      map[string]*TunnelStatus `json:"tunnels"`
+	Active      string                   `json:"active"`
+	GatewayAddr string                   `json:"gateway_addr"`
+	Tunnels     map[string]*TunnelStatus `json:"tunnels"`
 }
 
 // TunnelStatus represents the status of a single tunnel.
@@ -64,7 +61,6 @@ type Engine struct {
 	cfg        *config.Config
 	procMgr    *process.Manager
 	gw         *gateway.Gateway
-	dnsProxy   *dnsproxy.Proxy
 	sshTunnels map[string]*sshtunnel.Tunnel
 	mu         sync.RWMutex
 }
@@ -82,12 +78,6 @@ func New(cfg *config.Config) *Engine {
 func (e *Engine) Start() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-
-	// Start DNS proxy first (before tunnels need it)
-	if err := e.startDNSProxyLocked(); err != nil {
-		// Non-fatal: fall back to direct resolver
-		fmt.Printf("warning: dns proxy failed to start: %v (using direct resolvers)\n", err)
-	}
 
 	// Start gateway
 	if err := e.startGatewayLocked(); err != nil {
@@ -128,12 +118,6 @@ func (e *Engine) Stop() error {
 		e.gw = nil
 	}
 
-	// Stop DNS proxy last (tunnels may still need it during shutdown)
-	if e.dnsProxy != nil {
-		e.dnsProxy.Stop(context.Background())
-		e.dnsProxy = nil
-	}
-
 	return nil
 }
 
@@ -141,13 +125,6 @@ func (e *Engine) Stop() error {
 func (e *Engine) StartTunnel(tag string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-
-	// Ensure DNS proxy is running (non-fatal)
-	if e.dnsProxy == nil {
-		if err := e.startDNSProxyLocked(); err != nil {
-			fmt.Printf("warning: dns proxy failed to start: %v (using direct resolvers)\n", err)
-		}
-	}
 
 	if err := e.startTunnelLocked(tag); err != nil {
 		return err
@@ -231,10 +208,6 @@ func (e *Engine) Status() *Status {
 
 	if e.gw != nil {
 		s.GatewayAddr = e.gw.Addr()
-	}
-
-	if e.dnsProxy != nil && e.dnsProxy.IsRunning() {
-		s.DNSProxyAddr = e.dnsProxy.Addr()
 	}
 
 	for _, tc := range e.cfg.Tunnels {
@@ -340,15 +313,8 @@ func (e *Engine) startTunnelLocked(tag string) error {
 		}
 	}
 
-	// Determine resolver: per-tunnel override > DNS proxy > global fallback
-	var resolver string
-	if tc.Resolver != "" {
-		resolver = tc.Resolver
-	} else if e.dnsProxy != nil && e.dnsProxy.IsRunning() {
-		resolver = e.dnsProxy.Addr()
-	} else {
-		resolver = e.cfg.GetResolver(tc)
-	}
+	// Determine resolver: per-tunnel override > global config > default
+	resolver := e.cfg.GetResolver(tc)
 
 	// Build args — transport process always listens on transportPort
 	binary, args, err := t.BuildArgs(tc, transportPort, resolver)
@@ -367,12 +333,23 @@ func (e *Engine) startTunnelLocked(tag string) error {
 		transportAddr := fmt.Sprintf("127.0.0.1:%d", transportPort)
 		socksAddr := fmt.Sprintf("127.0.0.1:%d", exposedPort)
 
+		// DNS tunnels (dnstt) have very low bandwidth (~135 byte MTU), so SSH
+		// handshakes need much longer timeouts and more retries.
+		handshakeTimeout := 15 * time.Second
+		maxRetries := 2
+		if tc.Transport == config.TransportDNSTT {
+			handshakeTimeout = 60 * time.Second
+			maxRetries = 3
+		}
+
 		sshCfg := sshtunnel.Config{
-			TransportAddr: transportAddr,
-			SOCKSAddr:     socksAddr,
-			User:          tc.SSH.User,
-			Password:      tc.SSH.Password,
-			KeyPath:       tc.SSH.Key,
+			TransportAddr:    transportAddr,
+			SOCKSAddr:        socksAddr,
+			User:             tc.SSH.User,
+			Password:         tc.SSH.Password,
+			KeyPath:          tc.SSH.Key,
+			HandshakeTimeout: handshakeTimeout,
+			MaxRetries:       maxRetries,
 		}
 
 		go func() {
@@ -395,20 +372,6 @@ func (e *Engine) startTunnelLocked(tag string) error {
 		}()
 	}
 
-	return nil
-}
-
-func (e *Engine) startDNSProxyLocked() error {
-	if len(e.cfg.Resolvers) == 0 {
-		return nil // nothing to proxy
-	}
-
-	p := dnsproxy.New(e.cfg.Resolvers)
-	if err := p.Start(context.Background()); err != nil {
-		return err
-	}
-
-	e.dnsProxy = p
 	return nil
 }
 

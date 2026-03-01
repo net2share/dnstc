@@ -259,9 +259,6 @@ func handleServiceStatus() error {
 	if status.GatewayAddr != "" {
 		msg += fmt.Sprintf("\nGateway: %s", status.GatewayAddr)
 	}
-	if status.DNSProxyAddr != "" {
-		msg += fmt.Sprintf("\nDNS Proxy: %s", status.DNSProxyAddr)
-	}
 	_ = tui.ShowMessage(tui.AppMessage{Type: "info", Message: msg})
 	return nil
 }

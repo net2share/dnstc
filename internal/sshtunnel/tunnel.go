@@ -17,11 +17,13 @@ import (
 
 // Config configures an SSH tunnel.
 type Config struct {
-	TransportAddr string // local address of the DNS transport (e.g., "127.0.0.1:12345")
-	SOCKSAddr     string // local SOCKS5 listen address (e.g., "127.0.0.1:1080")
-	User          string
-	Password      string
-	KeyPath       string // path to PEM private key file
+	TransportAddr    string        // local address of the DNS transport (e.g., "127.0.0.1:12345")
+	SOCKSAddr        string        // local SOCKS5 listen address (e.g., "127.0.0.1:1080")
+	User             string
+	Password         string
+	KeyPath          string        // path to PEM private key file
+	HandshakeTimeout time.Duration // SSH handshake timeout (default 10s)
+	MaxRetries       int           // connection attempts (default 2)
 }
 
 // Tunnel manages an SSH connection and local SOCKS5 proxy.
@@ -64,11 +66,20 @@ func Start(cfg Config) (*Tunnel, error) {
 		return nil, fmt.Errorf("no SSH auth method configured")
 	}
 
+	timeout := cfg.HandshakeTimeout
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
+	maxRetries := cfg.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 2
+	}
+
 	sshCfg := &ssh.ClientConfig{
 		User:            cfg.User,
 		Auth:            auths,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         10 * time.Second,
+		Timeout:         timeout,
 	}
 
 	// Connect to the DNS transport's local port with retries.
@@ -76,11 +87,11 @@ func Start(cfg Config) (*Tunnel, error) {
 	// the session is fully established and can relay SSH traffic.
 	var client *ssh.Client
 	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
-			time.Sleep(time.Second)
+			time.Sleep(2 * time.Second)
 		}
-		tcpConn, err := net.DialTimeout("tcp", cfg.TransportAddr, 10*time.Second)
+		tcpConn, err := net.DialTimeout("tcp", cfg.TransportAddr, timeout)
 		if err != nil {
 			lastErr = fmt.Errorf("dial transport: %w", err)
 			continue
@@ -88,7 +99,7 @@ func Start(cfg Config) (*Tunnel, error) {
 		sshConn, chans, reqs, err := ssh.NewClientConn(tcpConn, cfg.TransportAddr, sshCfg)
 		if err != nil {
 			tcpConn.Close()
-			lastErr = fmt.Errorf("SSH handshake: %w", err)
+			lastErr = fmt.Errorf("SSH handshake (attempt %d/%d): %w", attempt+1, maxRetries, err)
 			continue
 		}
 		client = ssh.NewClient(sshConn, chans, reqs)

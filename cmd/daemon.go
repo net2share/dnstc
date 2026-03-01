@@ -206,9 +206,6 @@ var daemonStatusCmd = &cobra.Command{
 			if status.GatewayAddr != "" {
 				fmt.Printf("Gateway: %s\n", status.GatewayAddr)
 			}
-			if status.DNSProxyAddr != "" {
-				fmt.Printf("DNS Proxy: %s\n", status.DNSProxyAddr)
-			}
 			return nil
 		}
 
